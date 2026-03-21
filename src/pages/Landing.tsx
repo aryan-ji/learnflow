@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
 const WHATSAPP_NUMBER = "919999999999"; // TODO: replace with your number (with country code, no +)
-const LOGO_SRC = "/learnflow-mark.png"; // Place your logo file at `public/learnflow-mark.png`
+const LOGO_SRC = "/instipilot-mark.png"; // Recommended: place your logo at `public/instipilot-mark.png`
+const LOGO_FALLBACK_SRC = "/learnflow-mark.png"; // Backwards-compatible fallback
 
 function buildWhatsAppLink(message: string) {
   const text = encodeURIComponent(message);
@@ -89,7 +90,7 @@ export default function Landing() {
     const safeName = name.trim() || "[Name]";
     const safeInstitute = institute.trim() || "[Institute]";
     const safePhone = phone.trim() || "[Phone]";
-    return `Hi! I’m ${safeName} from ${safeInstitute}. I want to join the 2-month free pilot for Learn Flow. My phone number is ${safePhone}.`;
+    return `Hi! I’m ${safeName} from ${safeInstitute}. I want to join the 2-month free pilot for InstiPilot. My phone number is ${safePhone}.`;
   }, [name, institute, phone]);
 
   const whatsappHref = useMemo(() => buildWhatsAppLink(whatsappIntroMessage), [whatsappIntroMessage]);
@@ -117,10 +118,20 @@ export default function Landing() {
             <div className="flex h-16 items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
-                  <img src={LOGO_SRC} alt="Learn Flow" className="h-8 w-8 object-contain" loading="eager" />
+                  <img
+                    src={LOGO_SRC}
+                    alt="InstiPilot"
+                    className="h-8 w-8 object-contain"
+                    loading="eager"
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (img.src.endsWith(LOGO_FALLBACK_SRC)) return;
+                      img.src = LOGO_FALLBACK_SRC;
+                    }}
+                  />
                 </div>
                 <div className="leading-tight">
-                  <div className="text-sm font-semibold tracking-tight">Learn Flow</div>
+                  <div className="text-sm font-semibold tracking-tight">InstiPilot</div>
                   <div className="text-xs text-slate-500">for coaching institutes</div>
                 </div>
               </div>
@@ -265,7 +276,7 @@ export default function Landing() {
                 Is manual work eating your teaching time?
               </h2>
               <p className="mt-3 text-base text-slate-600">
-                Learn Flow removes busywork so you can focus on teaching and results.
+                InstiPilot removes busywork so you can focus on teaching and results.
               </p>
             </div>
 

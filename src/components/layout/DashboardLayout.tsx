@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 
-const LOGO_SRC = "/learnflow-mark.png"; // Place your logo file at `public/learnflow-mark.png`
+const LOGO_SRC = "/instipilot-mark.png"; // Recommended: place your logo at `public/instipilot-mark.png`
+const LOGO_FALLBACK_SRC = "/learnflow-mark.png"; // Backwards-compatible fallback
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -72,10 +73,20 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     <>
       <div className="h-16 flex items-center px-6 border-b border-slate-200 bg-white/60">
         <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-xl bg-white ring-1 ring-slate-200 shadow-sm">
-          <img src={LOGO_SRC} alt="Learn Flow" className="h-8 w-8 object-contain" loading="eager" />
+          <img
+            src={LOGO_SRC}
+            alt="InstiPilot"
+            className="h-8 w-8 object-contain"
+            loading="eager"
+            onError={(e) => {
+              const img = e.currentTarget;
+              if (img.src.endsWith(LOGO_FALLBACK_SRC)) return;
+              img.src = LOGO_FALLBACK_SRC;
+            }}
+          />
         </div>
         <div className="ml-3 leading-tight">
-          <div className="text-sm font-semibold tracking-tight text-slate-900">Learn Flow</div>
+          <div className="text-sm font-semibold tracking-tight text-slate-900">InstiPilot</div>
           <div className="text-xs text-slate-500 capitalize">{user?.role}</div>
         </div>
       </div>

@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const LOGO_SRC = "/learnflow-mark.png"; // Place your logo file at `public/learnflow-mark.png`
+const LOGO_SRC = "/instipilot-mark.png"; // Recommended: place your logo at `public/instipilot-mark.png`
+const LOGO_FALLBACK_SRC = "/learnflow-mark.png"; // Backwards-compatible fallback
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -61,10 +62,20 @@ export default function Login() {
 
             <div className="mb-8 flex items-center gap-3">
               <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl bg-white ring-1 ring-slate-200 shadow-sm">
-                <img src={LOGO_SRC} alt="Learn Flow" className="h-10 w-10 object-contain" loading="eager" />
+                <img
+                  src={LOGO_SRC}
+                  alt="InstiPilot"
+                  className="h-10 w-10 object-contain"
+                  loading="eager"
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (img.src.endsWith(LOGO_FALLBACK_SRC)) return;
+                    img.src = LOGO_FALLBACK_SRC;
+                  }}
+                />
               </div>
               <div className="leading-tight">
-                <div className="text-2xl font-semibold tracking-tight">Learn Flow</div>
+                <div className="text-2xl font-semibold tracking-tight">InstiPilot</div>
                 <div className="text-sm text-slate-500">Sign in to your dashboard</div>
               </div>
             </div>
@@ -147,7 +158,16 @@ export default function Login() {
             <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
-                  <img src={LOGO_SRC} alt="Learn Flow" className="h-10 w-10 object-contain" />
+                  <img
+                    src={LOGO_SRC}
+                    alt="InstiPilot"
+                    className="h-10 w-10 object-contain"
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (img.src.endsWith(LOGO_FALLBACK_SRC)) return;
+                      img.src = LOGO_FALLBACK_SRC;
+                    }}
+                  />
                 </div>
                 <div>
                   <div className="text-lg font-semibold tracking-tight">Attendance • Fees • Parent updates</div>
@@ -179,4 +199,3 @@ export default function Login() {
     </div>
   );
 }
-
