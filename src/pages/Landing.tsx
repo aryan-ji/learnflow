@@ -90,7 +90,7 @@ export default function Landing() {
     const safeName = name.trim() || "[Name]";
     const safeInstitute = institute.trim() || "[Institute]";
     const safePhone = phone.trim() || "[Phone]";
-    return `Hi! I’m ${safeName} from ${safeInstitute}. I want to join the 2-month free pilot for InstiPilot. My phone number is ${safePhone}.`;
+    return `Hi! I'm ${safeName} from ${safeInstitute}. I want to join the 2-month free pilot for InstiPilot. My phone number is ${safePhone}.`;
   }, [name, institute, phone]);
 
   const whatsappHref = useMemo(() => buildWhatsAppLink(whatsappIntroMessage), [whatsappIntroMessage]);
@@ -105,7 +105,7 @@ export default function Landing() {
       });
       return;
     }
-    toast({ title: "Opening WhatsApp…", description: "Send the message to join the pilot program." });
+    toast({ title: "Opening WhatsApp...", description: "Send the message to join the pilot program." });
     window.open(whatsappHref, "_blank", "noopener,noreferrer");
   };
 
@@ -115,8 +115,8 @@ export default function Landing() {
         {/* Top navigation */}
         <header className="sticky top-0 z-40 border-b border-slate-100 bg-white/80 backdrop-blur">
           <div className="container">
-            <div className="flex h-16 items-center justify-between">
-              <div className="flex items-center gap-2">
+            <div className="flex h-16 items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
                 <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
                   <img
                     src={LOGO_SRC}
@@ -130,20 +130,24 @@ export default function Landing() {
                     }}
                   />
                 </div>
-                <div className="leading-tight">
-                  <div className="text-sm font-semibold tracking-tight">InstiPilot</div>
-                  <div className="text-xs text-slate-500">for coaching institutes</div>
+                <div className="min-w-0 leading-tight">
+                  <div className="truncate text-base font-semibold tracking-tight text-slate-900">InstiPilot</div>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                <Button asChild variant="outline" className="rounded-xl border-slate-200 bg-white hover:bg-slate-50">
+                <Button
+                  asChild
+                  variant="outline"
+                  className="h-10 rounded-xl border-slate-200 bg-white px-4 text-sm hover:bg-slate-50 sm:h-11 sm:px-5"
+                >
                   <Link to="/login">Login</Link>
                 </Button>
-                <Button asChild className="rounded-xl bg-[#2563EB] text-white hover:bg-[#2563EB]/90">
+                <Button asChild className="h-10 rounded-xl bg-[#2563EB] px-4 text-sm text-white hover:bg-[#2563EB]/90 sm:h-11 sm:px-5">
                   <a href={whatsappHref} target="_blank" rel="noreferrer">
                     <MessageCircle className="h-4 w-4" />
-                    WhatsApp Us
+                    <span className="hidden sm:inline">WhatsApp Us</span>
+                    <span className="sm:hidden">WhatsApp</span>
                   </a>
                 </Button>
               </div>
