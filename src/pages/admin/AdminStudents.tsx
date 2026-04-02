@@ -24,6 +24,7 @@ import { useToast } from '@/hooks/use-toast';
 
 const AdminStudents = () => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [batchFilterId, setBatchFilterId] = useState("");
   const [isAddStudentDialogOpen, setIsAddStudentDialogOpen] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const { toast } = useToast();
@@ -40,10 +41,13 @@ const AdminStudents = () => {
   const [formBatchId, setFormBatchId] = useState<string>("");
   const [formParentId, setFormParentId] = useState<string>("");
 
-  const filteredStudents = students.filter(student =>
-    student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    student.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredStudents = students.filter((student) => {
+    const matchesQuery =
+      student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      student.email.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesBatch = !batchFilterId || student.batchId === batchFilterId;
+    return matchesQuery && matchesBatch;
+  });
 
   useEffect(() => {
     const load = async () => {
@@ -194,15 +198,31 @@ const AdminStudents = () => {
         </div>
 
         {/* SEARCH */}
-        <div className="relative w-full sm:max-w-md">
-          <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <div className="grid w-full gap-3 sm:max-w-3xl sm:grid-cols-2">
+          <div className="relative w-full">
+            <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search students..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 sm:pl-11 h-11 sm:h-12 rounded-xl bg-background border focus-visible:ring-2 focus-visible:ring-primary text-sm sm:text-base"
+            />
+          </div>
 
-          <Input
-            placeholder="Search students..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 sm:pl-11 h-11 sm:h-12 rounded-xl bg-background border focus-visible:ring-2 focus-visible:ring-primary text-sm sm:text-base"
-          />
+          <div className="w-full">
+            <select
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary sm:h-12"
+              value={batchFilterId}
+              onChange={(e) => setBatchFilterId(e.target.value)}
+            >
+              <option value="">All batches</option>
+              {batches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} ({b.id})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* STUDENTS TABLE */}

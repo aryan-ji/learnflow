@@ -151,3 +151,12 @@ alter table public.fees disable row level security;
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on all tables in schema public to anon, authenticated;
 alter default privileges in schema public grant select, insert, update, delete on tables to anon, authenticated;
+-- Prevent duplicate monthly fees for the same student within an institute
+-- Note: this will fail if duplicates already exist; remove duplicates first if needed.
+create unique index if not exists fees_unique_student_month_idx
+  on public.fees(institute_id, student_id, month);
+
+
+-- Institute-wide setting: hide all fee amounts (only show paid/not paid)
+alter table public.institutes add column if not exists hide_fee_amounts boolean not null default false;
+

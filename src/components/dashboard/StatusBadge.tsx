@@ -12,9 +12,10 @@ type Status =
 
 interface StatusBadgeProps {
   status: Status;
+  labelOverride?: string;
 }
 
-const StatusBadge = ({ status }: StatusBadgeProps) => {
+const StatusBadge = ({ status, labelOverride }: StatusBadgeProps) => {
   const statusConfig: Record<
     Status,
     { label: string; className: string }
@@ -62,7 +63,7 @@ const StatusBadge = ({ status }: StatusBadgeProps) => {
         config.className
       )}
     >
-      {config.label}
+      {labelOverride ?? config.label}
     </span>
   );
 };

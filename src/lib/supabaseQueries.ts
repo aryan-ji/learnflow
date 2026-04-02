@@ -75,6 +75,12 @@ type DbFee = {
   paid_date?: string | null;
 };
 
+type DbInstitute = {
+  id: string;
+  name: string;
+  hide_fee_amounts?: boolean | null;
+};
+
 const mapUser = (row: DbUser): User => ({
   id: row.id,
   name: row.name,
@@ -146,6 +152,47 @@ const mapFee = (row: DbFee): Fee => ({
   dueDate: row.due_date,
   paidDate: row.paid_date ?? undefined,
 });
+
+// Institute settings
+export const getInstituteSettings = async (): Promise<{ hideFeeAmounts: boolean }> => {
+  const { data, error } = await supabase
+    .from("institutes")
+    .select("hide_fee_amounts")
+    .eq("id", INSTITUTE_ID)
+    .single();
+  if (error) {
+    if ((error as any)?.code === "PGRST204") {
+      console.error(
+        "Institute settings column missing (hide_fee_amounts). Run the migration and reload PostgREST schema cache.",
+        error,
+      );
+    } else {
+      console.error("Error fetching institute settings:", error);
+    }
+    return { hideFeeAmounts: false };
+  }
+  const row = data as DbInstitute;
+  return { hideFeeAmounts: Boolean(row.hide_fee_amounts) };
+};
+
+export const updateInstituteHideFeeAmounts = async (hideFeeAmounts: boolean): Promise<boolean> => {
+  const { error } = await supabase
+    .from("institutes")
+    .update({ hide_fee_amounts: hideFeeAmounts })
+    .eq("id", INSTITUTE_ID);
+  if (error) {
+    if ((error as any)?.code === "PGRST204") {
+      console.error(
+        "Institute settings column missing (hide_fee_amounts). Run the migration and reload PostgREST schema cache.",
+        error,
+      );
+    } else {
+      console.error("Error updating institute settings:", error);
+    }
+    return false;
+  }
+  return true;
+};
 
 // Users
 export const getUsers = async (): Promise<User[]> => {
@@ -591,12 +638,25 @@ export const getFeesForStudents = async (studentIds: string[]): Promise<Fee[]> =
   return (data as DbFee[] | null)?.map(mapFee) || [];
 };
 
-export const updateFeeStatus = async (feeId: string, status: string, paidDate?: string): Promise<Fee | null> => {
+export const updateFeeStatus = async (
+  feeId: string,
+  status: Fee["status"],
+  paidDate?: string,
+): Promise<Fee | null> => {
   const updateData: any = { status };
-  if (paidDate) {
-    updateData.paid_date = paidDate;
+  if (status === "paid") {
+    updateData.paid_date = paidDate ?? null;
+  } else {
+    updateData.paid_date = null;
   }
-  const { data, error } = await supabase.from('fees').update(updateData).eq("institute_id", INSTITUTE_ID).eq('id', feeId).select().single();
+
+  const { data, error } = await supabase
+    .from("fees")
+    .update(updateData)
+    .eq("institute_id", INSTITUTE_ID)
+    .eq("id", feeId)
+    .select()
+    .single();
   if (error) {
     console.error('Error updating fee:', error);
     return null;
@@ -621,4 +681,29 @@ export const createFee = async (fee: Fee): Promise<Fee | null> => {
     return null;
   }
   return data ? mapFee(data as DbFee) : null;
+};
+
+export const upsertFees = async (fees: Fee[]): Promise<Fee[]> => {
+  if (fees.length === 0) return [];
+  const payloads = fees.map((fee) => ({
+    id: fee.id,
+    institute_id: INSTITUTE_ID,
+    student_id: fee.studentId,
+    month: fee.month,
+    amount: fee.amount,
+    status: fee.status,
+    due_date: fee.dueDate,
+    paid_date: fee.paidDate ?? null,
+  }));
+
+  const { data, error } = await supabase
+    .from("fees")
+    .upsert(payloads, { onConflict: "id" })
+    .select();
+
+  if (error) {
+    console.error("Error upserting fees:", error);
+    return [];
+  }
+  return (data as DbFee[] | null)?.map(mapFee) || [];
 };

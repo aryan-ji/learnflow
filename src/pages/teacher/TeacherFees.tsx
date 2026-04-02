@@ -4,6 +4,7 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import StatCard from "@/components/dashboard/StatCard";
 import StatusBadge from "@/components/dashboard/StatusBadge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   getBatchesByTeacher,
   getFeesForStudents,
+  getInstituteSettings,
   getStudentsByBatch,
   updateFeeStatus,
 } from "@/lib/supabaseQueries";
@@ -22,6 +24,7 @@ import type { Fee, Student } from "@/types";
 import { CreditCard, CheckCircle, Clock, AlertCircle, MoreVertical, Eye, Check } from "lucide-react";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
+const SHOW_AMOUNTS_KEY = "instipilot.teacherFees.showAmounts";
 
 const TeacherFees = () => {
   const { user } = useAuth();
@@ -32,6 +35,23 @@ const TeacherFees = () => {
   const [fees, setFees] = useState<Fee[]>([]);
   const [studentsById, setStudentsById] = useState<Record<string, Student>>({});
   const [loading, setLoading] = useState(false);
+  const [hideFeeAmounts, setHideFeeAmounts] = useState(false);
+  const [showAmounts, setShowAmounts] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem(SHOW_AMOUNTS_KEY);
+      return raw !== "false";
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SHOW_AMOUNTS_KEY, String(showAmounts));
+    } catch {
+      // ignore
+    }
+  }, [showAmounts]);
 
   const studentIdFilter = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -43,6 +63,9 @@ const TeacherFees = () => {
       if (!user?.id) return;
       setLoading(true);
       try {
+        const settings = await getInstituteSettings();
+        setHideFeeAmounts(settings.hideFeeAmounts);
+
         const batches = await getBatchesByTeacher(user.id);
         const studentLists = await Promise.all(
           batches.map((b) => getStudentsByBatch(b.id)),
@@ -72,14 +95,22 @@ const TeacherFees = () => {
     load();
   }, [toast, user?.id]);
 
+  const effectiveShowAmounts = hideFeeAmounts ? false : showAmounts;
+
   const filteredFees = useMemo(() => {
     if (!studentIdFilter) return fees;
     return fees.filter((f) => f.studentId === studentIdFilter);
   }, [fees, studentIdFilter]);
 
-  const paidFees = filteredFees.filter((f) => f.status === "paid");
-  const pendingFees = filteredFees.filter((f) => f.status === "pending");
-  const overdueFees = filteredFees.filter((f) => f.status === "overdue");
+  const effectiveStatus = (fee: Fee): Fee["status"] => {
+    if (fee.status === "paid") return "paid";
+    return fee.dueDate < todayIso() ? "overdue" : "pending";
+  };
+
+  const paidFees = filteredFees.filter((f) => effectiveStatus(f) === "paid");
+  const pendingFees = filteredFees.filter((f) => effectiveStatus(f) === "pending");
+  const overdueFees = filteredFees.filter((f) => effectiveStatus(f) === "overdue");
+  const notPaidCount = filteredFees.length - paidFees.length;
 
   const totalCollected = paidFees.reduce((sum, f) => sum + f.amount, 0);
 
@@ -124,33 +155,54 @@ const TeacherFees = () => {
             </p>
           </div>
 
-          {studentIdFilter && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs sm:text-sm text-muted-foreground">
-                Filter: {studentsById[studentIdFilter]?.name || studentIdFilter}
-              </span>
-              <Button
-                variant="outline"
-                className="rounded-xl"
-                onClick={() => navigate("/teacher/fees")}
-              >
-                Clear
-              </Button>
-            </div>
-          )}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            {!hideFeeAmounts ? (
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                <Switch checked={showAmounts} onCheckedChange={setShowAmounts} />
+                <span className="text-sm font-semibold text-slate-800">Show amounts</span>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-[#F9FAFB] px-3 py-2 text-sm text-slate-700">
+                Amounts hidden by Admin
+              </div>
+            )}
+
+            {studentIdFilter && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs sm:text-sm text-muted-foreground">
+                  Filter: {studentsById[studentIdFilter]?.name || studentIdFilter}
+                </span>
+                <Button
+                  variant="outline"
+                  className="rounded-xl"
+                  onClick={() => navigate("/teacher/fees")}
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            title="Total Collected"
-            value={loading ? "..." : `₹${totalCollected.toLocaleString()}`}
-            icon={CreditCard}
-            variant="success"
-          />
-          <StatCard title="Paid" value={paidFees.length} icon={CheckCircle} variant="success" />
-          <StatCard title="Pending" value={pendingFees.length} icon={Clock} variant="warning" />
-          <StatCard title="Overdue" value={overdueFees.length} icon={AlertCircle} variant="warning" />
-        </div>
+        {hideFeeAmounts ? (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <StatCard title="Total Fees" value={filteredFees.length} icon={CreditCard} variant="primary" />
+            <StatCard title="Paid" value={paidFees.length} icon={CheckCircle} variant="success" />
+            <StatCard title="Not Paid" value={notPaidCount} icon={Clock} variant="warning" />
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title="Total Collected"
+              value={loading ? "..." : effectiveShowAmounts ? `${"\u20B9"}${totalCollected.toLocaleString()}` : "Hidden"}
+              icon={CreditCard}
+              variant="success"
+            />
+            <StatCard title="Paid" value={paidFees.length} icon={CheckCircle} variant="success" />
+            <StatCard title="Pending" value={pendingFees.length} icon={Clock} variant="warning" />
+            <StatCard title="Overdue" value={overdueFees.length} icon={AlertCircle} variant="warning" />
+          </div>
+        )}
 
         <div className="border rounded-xl sm:rounded-2xl overflow-hidden bg-card shadow-sm">
           <div className="p-4 sm:p-6 border-b">
@@ -208,7 +260,14 @@ const TeacherFees = () => {
                       </td>
 
                       <td className="py-3 px-4 sm:py-4 sm:px-6 font-semibold whitespace-nowrap">
-                        ₹{fee.amount.toLocaleString()}
+                        {effectiveShowAmounts ? (
+                          <>
+                            {"\u20B9"}
+                            {fee.amount.toLocaleString()}
+                          </>
+                        ) : (
+                          <span className="text-slate-500">•••</span>
+                        )}
                       </td>
 
                       <td className="py-3 px-4 sm:py-4 sm:px-6 text-muted-foreground whitespace-nowrap">
@@ -220,7 +279,15 @@ const TeacherFees = () => {
                       </td>
 
                       <td className="py-3 px-4 sm:py-4 sm:px-6">
-                        <StatusBadge status={fee.status} />
+                        {hideFeeAmounts ? (
+                          effectiveStatus(fee) === "paid" ? (
+                            <StatusBadge status="paid" />
+                          ) : (
+                            <StatusBadge status="pending" labelOverride="Not Paid" />
+                          )
+                        ) : (
+                          <StatusBadge status={effectiveStatus(fee)} />
+                        )}
                       </td>
 
                       <td className="py-3 px-4 sm:py-4 sm:px-6">
@@ -270,4 +337,3 @@ const TeacherFees = () => {
 };
 
 export default TeacherFees;
-

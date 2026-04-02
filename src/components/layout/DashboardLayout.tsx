@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -12,8 +12,18 @@ import {
   Bell,
   Search,
   Menu,
+  X,
 } from "lucide-react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import {
+  getBatches,
+  getBatchesByTeacher,
+  getStudents,
+  getStudentsByBatch,
+  getStudentsByParent,
+  getTeachers,
+} from "@/lib/supabaseQueries";
+import type { Batch, Student, Teacher } from "@/types";
 
 const LOGO_SRC = "/instipilot-mark.png"; // Recommended: place your logo at `public/instipilot-mark.png`
 const LOGO_FALLBACK_SRC = "/learnflow-mark.png"; // Backwards-compatible fallback
@@ -22,11 +32,94 @@ interface DashboardLayoutProps {
   children: ReactNode;
 }
 
+type SearchItem =
+  | { type: "student"; id: string; title: string; subtitle?: string }
+  | { type: "batch"; id: string; title: string; subtitle?: string }
+  | { type: "teacher"; id: string; title: string; subtitle?: string };
+
+type RankedItem = SearchItem & { score: number };
+
+const normalize = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const levenshtein = (aRaw: string, bRaw: string) => {
+  const a = normalize(aRaw);
+  const b = normalize(bRaw);
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  const prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  const curr = new Array(b.length + 1).fill(0);
+
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    const aChar = a.charCodeAt(i - 1);
+    for (let j = 1; j <= b.length; j++) {
+      const cost = aChar === b.charCodeAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(
+        prev[j] + 1, // delete
+        curr[j - 1] + 1, // insert
+        prev[j - 1] + cost, // replace
+      );
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+};
+
+const rankSearch = (queryRaw: string, items: SearchItem[], limit = 8): RankedItem[] => {
+  const query = normalize(queryRaw);
+  if (!query) return [];
+  const short = query.length <= 2;
+
+  const scored: RankedItem[] = [];
+  for (const item of items) {
+    const title = item.title ?? "";
+    const subtitle = item.subtitle ?? "";
+    const hay = `${title} ${subtitle}`;
+    const hayNorm = normalize(hay);
+
+    if (short) {
+      if (!hayNorm.includes(query)) continue;
+      scored.push({ ...item, score: 0 });
+      continue;
+    }
+
+    let score = 999;
+
+    if (hayNorm.includes(query)) {
+      score = 0;
+    } else {
+      const words = hayNorm.split(" ").filter(Boolean);
+      for (const w of words) score = Math.min(score, levenshtein(query, w));
+      score = Math.min(score, levenshtein(query, hayNorm.slice(0, Math.min(hayNorm.length, query.length + 4))));
+    }
+
+    const maxDist = Math.max(2, Math.floor(query.length / 3));
+    if (score > maxDist) continue;
+    scored.push({ ...item, score });
+  }
+
+  scored.sort((a, b) => a.score - b.score || a.title.localeCompare(b.title));
+  return scored.slice(0, limit);
+};
+
 const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchItems, setSearchItems] = useState<SearchItem[]>([]);
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
 
   const handleLogout = () => {
     logout();
@@ -68,6 +161,81 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       : user?.role === "teacher"
       ? teacherNavItems
       : parentNavItems;
+
+  useEffect(() => {
+    const onDocDown = (e: MouseEvent) => {
+      const el = searchWrapRef.current;
+      if (!el) return;
+      if (!el.contains(e.target as Node)) setSearchOpen(false);
+    };
+    document.addEventListener("mousedown", onDocDown);
+    return () => document.removeEventListener("mousedown", onDocDown);
+  }, []);
+
+  useEffect(() => {
+    const loadIndex = async () => {
+      if (!user?.role) return;
+
+      try {
+        if (user.role === "admin") {
+          const [students, batches, teachers] = await Promise.all([getStudents(), getBatches(), getTeachers()]);
+          const items: SearchItem[] = [
+            ...students.map((s: Student) => ({ type: "student", id: s.id, title: s.name, subtitle: s.email })),
+            ...batches.map((b: Batch) => ({ type: "batch", id: b.id, title: b.name, subtitle: b.subject })),
+            ...teachers.map((t: Teacher) => ({ type: "teacher", id: t.id, title: t.name, subtitle: t.email })),
+          ];
+          setSearchItems(items);
+          return;
+        }
+
+        if (user.role === "teacher") {
+          const batches = await getBatchesByTeacher(user.id);
+          const studentLists = await Promise.all(batches.map((b) => getStudentsByBatch(b.id)));
+          const students = Array.from(new Map(studentLists.flat().map((s) => [s.id, s] as const)).values());
+          const items: SearchItem[] = [
+            ...students.map((s: Student) => ({ type: "student", id: s.id, title: s.name, subtitle: s.email })),
+            ...batches.map((b: Batch) => ({ type: "batch", id: b.id, title: b.name, subtitle: b.subject })),
+          ];
+          setSearchItems(items);
+          return;
+        }
+
+        // parent
+        const kids = await getStudentsByParent(user.id);
+        setSearchItems(kids.map((s) => ({ type: "student", id: s.id, title: s.name, subtitle: s.email })));
+      } catch (e) {
+        console.error("Failed to build search index:", e);
+        setSearchItems([]);
+      }
+    };
+    loadIndex();
+  }, [user?.id, user?.role]);
+
+  const rankedResults = useMemo(() => rankSearch(searchQuery, searchItems), [searchItems, searchQuery]);
+
+  const goToResult = (item: SearchItem) => {
+    if (!user?.role) return;
+
+    // Most useful destinations today: fees filtered by studentId, attendance by batch/teacher.
+    if (item.type === "student") {
+      if (user.role === "admin") navigate(`/admin/fees?studentId=${encodeURIComponent(item.id)}`);
+      if (user.role === "teacher") navigate(`/teacher/fees?studentId=${encodeURIComponent(item.id)}`);
+      if (user.role === "parent") navigate(`/parent/fees`, { state: { studentId: item.id } });
+    }
+
+    if (item.type === "batch") {
+      if (user.role === "admin") navigate(`/admin/attendance`, { state: { batchId: item.id } });
+      if (user.role === "teacher") navigate(`/teacher/attendance`, { state: { batchId: item.id } });
+    }
+
+    if (item.type === "teacher") {
+      if (user.role === "admin") navigate(`/admin/teachers`);
+    }
+
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSidebarOpen(false);
+  };
 
   const SidebarContent = () => (
     <>
@@ -158,12 +326,67 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
             </button>
           </div>
 
-          <div className="relative flex-1 max-w-md">
+          <div ref={searchWrapRef} className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input
               placeholder="Search..."
-              className="w-full pl-10 pr-4 py-2 text-sm rounded-xl border border-slate-200 bg-[#F9FAFB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSearchOpen(true);
+              }}
+              onFocus={() => setSearchOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setSearchOpen(false);
+                if (e.key === "Enter" && rankedResults[0]) goToResult(rankedResults[0]);
+              }}
+              className="w-full pl-10 pr-10 py-2 text-sm rounded-xl border border-slate-200 bg-[#F9FAFB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
             />
+            {searchQuery ? (
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-500 hover:bg-white hover:text-slate-700"
+                onClick={() => {
+                  setSearchQuery("");
+                  setSearchOpen(false);
+                }}
+                aria-label="Clear search"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+
+            {searchOpen && searchQuery.trim() ? (
+              <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                <div className="max-h-80 overflow-auto p-2">
+                  {rankedResults.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-slate-600">No results</div>
+                  ) : (
+                    rankedResults.map((r) => (
+                      <button
+                        key={`${r.type}:${r.id}`}
+                        type="button"
+                        onClick={() => goToResult(r)}
+                        className="w-full rounded-lg px-3 py-2 text-left hover:bg-[#F9FAFB]"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-slate-900">{r.title}</div>
+                            {r.subtitle ? <div className="truncate text-xs text-slate-500">{r.subtitle}</div> : null}
+                          </div>
+                          <div className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                            {r.type}
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+                <div className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
+                  Tip: press <span className="font-semibold text-slate-700">Enter</span> to open the top result.
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-4">

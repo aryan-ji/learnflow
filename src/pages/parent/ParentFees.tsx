@@ -13,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { getBatches, getFeesByStudent, getStudentsByParent, updateFeeStatus } from "@/lib/supabaseQueries";
+import { getBatches, getFeesByStudent, getInstituteSettings, getStudentsByParent, updateFeeStatus } from "@/lib/supabaseQueries";
 import type { Batch, Fee, Student } from "@/types";
 import { CreditCard, Calendar, AlertCircle } from "lucide-react";
 
@@ -27,19 +27,27 @@ const ParentFees = () => {
   const [batchesById, setBatchesById] = useState<Record<string, Batch>>({});
   const [feesByStudentId, setFeesByStudentId] = useState<Record<string, Fee[]>>({});
   const [loading, setLoading] = useState(false);
+  const [hideFeeAmounts, setHideFeeAmounts] = useState(false);
 
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [selectedFee, setSelectedFee] = useState<Fee | null>(null);
+
+  const effectiveStatus = (fee: Fee): Fee["status"] => {
+    if (fee.status === "paid") return "paid";
+    return fee.dueDate < todayIso() ? "overdue" : "pending";
+  };
 
   useEffect(() => {
     const load = async () => {
       if (!user?.id) return;
       setLoading(true);
       try {
-        const [kids, batches] = await Promise.all([
+        const [kids, batches, settings] = await Promise.all([
           getStudentsByParent(user.id),
           getBatches(),
+          getInstituteSettings(),
         ]);
+        setHideFeeAmounts(settings.hideFeeAmounts);
         setChildren(kids);
         const batchMap: Record<string, Batch> = {};
         batches.forEach((b) => (batchMap[b.id] = b));
@@ -92,7 +100,9 @@ const ParentFees = () => {
       setIsPaymentDialogOpen(false);
       toast({
         title: "Payment Successful",
-        description: `Fee payment of ₹${updated.amount.toLocaleString()} processed successfully!`,
+        description: hideFeeAmounts
+          ? "Fee payment processed successfully!"
+          : `Fee payment of ${"\u20B9"}${updated.amount.toLocaleString()} processed successfully!`,
       });
       setSelectedFee(null);
     } catch (error) {
@@ -133,14 +143,14 @@ const ParentFees = () => {
         {/* CHILDREN */}
         {childrenWithFees.map(({ child, fees, batch }) => {
           const totalPaid = fees
-            .filter((f) => f.status === "paid")
+            .filter((f) => effectiveStatus(f) === "paid")
             .reduce((sum, f) => sum + f.amount, 0);
 
           const totalPending = fees
-            .filter((f) => f.status !== "paid")
+            .filter((f) => effectiveStatus(f) !== "paid")
             .reduce((sum, f) => sum + f.amount, 0);
 
-          const hasOverdue = fees.some((f) => f.status === "overdue");
+          const hasOverdue = fees.some((f) => effectiveStatus(f) === "overdue");
 
           return (
             <div
@@ -166,7 +176,14 @@ const ParentFees = () => {
                 <div className="bg-green-100 rounded-2xl p-5 border border-green-200">
                   <p className="text-sm text-muted-foreground mb-1">Total Paid</p>
                   <p className="text-2xl font-bold text-green-700">
-                    ₹{totalPaid.toLocaleString()}
+                    {hideFeeAmounts ? (
+                      "Hidden"
+                    ) : (
+                      <>
+                        {"\u20B9"}
+                        {totalPaid.toLocaleString()}
+                      </>
+                    )}
                   </p>
                 </div>
 
@@ -183,7 +200,14 @@ const ParentFees = () => {
                       totalPending > 0 ? "text-yellow-600" : "text-foreground"
                     }`}
                   >
-                    ₹{totalPending.toLocaleString()}
+                    {hideFeeAmounts ? (
+                      "Hidden"
+                    ) : (
+                      <>
+                        {"\u20B9"}
+                        {totalPending.toLocaleString()}
+                      </>
+                    )}
                   </p>
                 </div>
 
@@ -236,7 +260,14 @@ const ParentFees = () => {
                         <div className="text-right flex items-center gap-4">
                           <div>
                             <p className="font-semibold text-lg">
-                              ₹{fee.amount.toLocaleString()}
+                              {hideFeeAmounts ? (
+                                "Hidden"
+                              ) : (
+                                <>
+                                  {"\u20B9"}
+                                  {fee.amount.toLocaleString()}
+                                </>
+                              )}
                             </p>
 
                             {fee.paidDate && (
@@ -248,9 +279,17 @@ const ParentFees = () => {
                           </div>
 
                           <div className="flex flex-col items-end gap-2">
-                            <StatusBadge status={fee.status} />
+                            {hideFeeAmounts ? (
+                              effectiveStatus(fee) === "paid" ? (
+                                <StatusBadge status="paid" />
+                              ) : (
+                                <StatusBadge status="pending" labelOverride="Not Paid" />
+                              )
+                            ) : (
+                              <StatusBadge status={effectiveStatus(fee)} />
+                            )}
 
-                            {fee.status !== "paid" && (
+                            {effectiveStatus(fee) !== "paid" && (
                               <Button
                                 size="sm"
                                 className="rounded-xl bg-primary text-primary-foreground"
@@ -284,10 +323,15 @@ const ParentFees = () => {
           {selectedFee && (
             <div className="space-y-4">
               <div className="bg-muted/40 rounded-lg p-4">
-                <p className="text-sm text-muted-foreground mb-1">Amount Due</p>
-                <p className="text-3xl font-bold">
-                  ₹{selectedFee.amount.toLocaleString()}
-                </p>
+                <p className="text-sm text-muted-foreground mb-1">{hideFeeAmounts ? "Fee" : "Amount Due"}</p>
+                {!hideFeeAmounts ? (
+                  <p className="text-3xl font-bold">
+                    {"\u20B9"}
+                    {selectedFee.amount.toLocaleString()}
+                  </p>
+                ) : (
+                  <p className="text-2xl font-bold">Amount hidden by institute</p>
+                )}
                 <p className="text-sm text-muted-foreground mt-2">
                   For: {selectedFee.month}
                 </p>
@@ -324,7 +368,7 @@ const ParentFees = () => {
                   onClick={handleProcessPayment}
                   disabled={loading}
                 >
-                  Pay ₹{selectedFee.amount.toLocaleString()}
+                  {hideFeeAmounts ? "Mark as Paid" : <>Pay {"\u20B9"}{selectedFee.amount.toLocaleString()}</>}
                 </Button>
               </DialogFooter>
             </div>
@@ -336,4 +380,3 @@ const ParentFees = () => {
 };
 
 export default ParentFees;
-
