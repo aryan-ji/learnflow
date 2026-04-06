@@ -17,6 +17,12 @@ export interface Student {
   parentId: string;
   enrollmentDate: string;
   status: 'active' | 'inactive';
+  motherName?: string;
+  fatherName?: string;
+  parentPhone?: string;
+  parentEmail?: string;
+  address?: string;
+  school?: string;
 }
 
 export interface Batch {

@@ -17,8 +17,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { deleteStudent, getStudents, getBatches, createStudent, getUsers } from "@/lib/supabaseQueries";
-import { Student, Batch, User } from "@/types";
+import {
+  createStudent,
+  deleteStudent,
+  getBatches,
+  getOrCreateParentUserByEmail,
+  getOrCreateUnassignedParentUser,
+  getStudents,
+  updateStudent,
+} from "@/lib/supabaseQueries";
+import { Batch, Student } from "@/types";
 import { Search, Plus, MoreVertical, Edit, Trash2, Eye } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -26,20 +34,42 @@ const AdminStudents = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [batchFilterId, setBatchFilterId] = useState("");
   const [isAddStudentDialogOpen, setIsAddStudentDialogOpen] = useState(false);
+  const [isViewStudentDialogOpen, setIsViewStudentDialogOpen] = useState(false);
+  const [isEditStudentDialogOpen, setIsEditStudentDialogOpen] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const { toast } = useToast();
 
   const [students, setStudents] = useState<Student[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
-  const [parents, setParents] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const selectedStudent = selectedStudentId ? students.find((s) => s.id === selectedStudentId) ?? null : null;
+  const batchNameById = (id: string) => batches.find((b) => b.id === id)?.name ?? id;
 
   // form fields
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
+  const [formMotherName, setFormMotherName] = useState("");
+  const [formFatherName, setFormFatherName] = useState("");
+  const [formParentPhone, setFormParentPhone] = useState("");
+  const [formParentEmail, setFormParentEmail] = useState("");
+  const [formAddress, setFormAddress] = useState("");
+  const [formSchool, setFormSchool] = useState("");
   const [formBatchId, setFormBatchId] = useState<string>("");
-  const [formParentId, setFormParentId] = useState<string>("");
+
+  // edit form fields
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editMotherName, setEditMotherName] = useState("");
+  const [editFatherName, setEditFatherName] = useState("");
+  const [editParentPhone, setEditParentPhone] = useState("");
+  const [editParentEmail, setEditParentEmail] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+  const [editSchool, setEditSchool] = useState("");
+  const [editBatchId, setEditBatchId] = useState<string>("");
+  const [editStatus, setEditStatus] = useState<Student["status"]>("active");
 
   const filteredStudents = students.filter((student) => {
     const matchesQuery =
@@ -53,10 +83,9 @@ const AdminStudents = () => {
     const load = async () => {
       setLoading(true);
       try {
-        const [s, b, u] = await Promise.all([getStudents(), getBatches(), getUsers()]);
+        const [s, b] = await Promise.all([getStudents(), getBatches()]);
         setStudents(s);
         setBatches(b);
-        setParents(u.filter((x) => x.role === "parent"));
       } catch (err) {
         console.error('Error loading students/batches', err);
         toast({ title: 'Error', description: 'Failed to load data' });
@@ -75,8 +104,13 @@ const AdminStudents = () => {
     setFormName("");
     setFormEmail("");
     setFormPhone("");
+    setFormMotherName("");
+    setFormFatherName("");
+    setFormParentPhone("");
+    setFormParentEmail("");
+    setFormAddress("");
+    setFormSchool("");
     setFormBatchId("");
-    setFormParentId("");
   };
 
   const generateStudentId = () => {
@@ -87,10 +121,13 @@ const AdminStudents = () => {
   };
 
   const handleSaveStudent = async () => {
-    if (!formName.trim() || !formEmail.trim() || !formPhone.trim() || !formBatchId || !formParentId) {
+    if (
+      !formName.trim() ||
+      !formBatchId
+    ) {
       toast({
         title: "Missing info",
-        description: "Please fill Name, Email, Phone, Batch, and Parent.",
+        description: "Please fill Name and Batch.",
         variant: "destructive",
       });
       return;
@@ -98,13 +135,38 @@ const AdminStudents = () => {
 
     setLoading(true);
     try {
+      const parentName = formFatherName.trim() || formMotherName.trim() || `Parent of ${formName.trim()}`;
+      const parent = formParentEmail.trim()
+        ? await getOrCreateParentUserByEmail({
+            parentEmail: formParentEmail.trim(),
+            parentName,
+          })
+        : await getOrCreateUnassignedParentUser();
+
+      if (!parent) {
+        toast({
+          title: "Error",
+          description: "Could not set a parent user for this student.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const studentId = generateStudentId();
+
       const newStudent: Student = {
-        id: generateStudentId(),
+        id: studentId,
         name: formName.trim(),
-        email: formEmail.trim(),
-        phone: formPhone.trim(),
+        email: formEmail.trim() || `${studentId}@student.local`,
+        phone: formPhone.trim() || "",
+        motherName: formMotherName.trim() || undefined,
+        fatherName: formFatherName.trim() || undefined,
+        parentPhone: formParentPhone.trim() || undefined,
+        parentEmail: formParentEmail.trim() || undefined,
+        address: formAddress.trim() || undefined,
+        school: formSchool.trim() || undefined,
         batchId: formBatchId,
-        parentId: formParentId,
+        parentId: parent.id,
         enrollmentDate: new Date().toISOString().slice(0, 10),
         status: "active",
       };
@@ -139,19 +201,94 @@ const AdminStudents = () => {
   };
 
   const handleEditStudent = (studentId: string) => {
-    toast({
-      title: "Edit Student",
-      description: `Opening edit dialog for student ${studentId}`
-    });
     setSelectedStudentId(studentId);
+    const s = students.find((x) => x.id === studentId);
+    if (!s) return;
+
+    setEditName(s.name ?? "");
+    setEditEmail(s.email ?? "");
+    setEditPhone(s.phone ?? "");
+    setEditMotherName(s.motherName ?? "");
+    setEditFatherName(s.fatherName ?? "");
+    setEditParentPhone(s.parentPhone ?? "");
+    setEditParentEmail(s.parentEmail ?? "");
+    setEditAddress(s.address ?? "");
+    setEditSchool(s.school ?? "");
+    setEditBatchId(s.batchId ?? "");
+    setEditStatus(s.status ?? "active");
+    setIsEditStudentDialogOpen(true);
   };
 
   const handleViewStudent = (studentId: string) => {
-    toast({
-      title: "View Details",
-      description: `Loading student details for ${studentId}`
-    });
     setSelectedStudentId(studentId);
+    setIsViewStudentDialogOpen(true);
+  };
+
+  const handleSaveEditStudent = async () => {
+    const s = selectedStudent;
+    if (!s) return;
+
+    if (!editName.trim() || !editBatchId) {
+      toast({ title: "Missing info", description: "Please fill Name and Batch.", variant: "destructive" });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const parentName = editFatherName.trim() || editMotherName.trim() || `Parent of ${editName.trim()}`;
+      let parentId = s.parentId;
+      const nextParentEmail = editParentEmail.trim().toLowerCase();
+      const prevParentEmail = (s.parentEmail ?? "").trim().toLowerCase();
+
+      if (nextParentEmail && nextParentEmail !== prevParentEmail) {
+        const parent = await getOrCreateParentUserByEmail({ parentEmail: nextParentEmail, parentName });
+        if (!parent) {
+          toast({ title: "Error", description: "Could not find/create the parent user. Check Parent Email.", variant: "destructive" });
+          return;
+        }
+        parentId = parent.id;
+      }
+
+      if (!parentId) {
+        const unassigned = await getOrCreateUnassignedParentUser();
+        if (!unassigned) {
+          toast({ title: "Error", description: "Could not set a parent user for this student.", variant: "destructive" });
+          return;
+        }
+        parentId = unassigned.id;
+      }
+
+      const updated = await updateStudent({
+        id: s.id,
+        name: editName.trim(),
+        email: editEmail.trim() || undefined,
+        phone: editPhone.trim() || undefined,
+        batchId: editBatchId,
+        parentId,
+        enrollmentDate: s.enrollmentDate,
+        status: editStatus,
+        motherName: editMotherName.trim() || undefined,
+        fatherName: editFatherName.trim() || undefined,
+        parentPhone: editParentPhone.trim() || undefined,
+        parentEmail: editParentEmail.trim() || undefined,
+        address: editAddress.trim() || undefined,
+        school: editSchool.trim() || undefined,
+      });
+
+      if (!updated) {
+        toast({ title: "Error", description: "Failed to update student. Check Supabase permissions.", variant: "destructive" });
+        return;
+      }
+
+      setStudents((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+      setIsEditStudentDialogOpen(false);
+      toast({ title: "Updated", description: "Student updated successfully." });
+    } catch (err) {
+      console.error("Failed to update student:", err);
+      toast({ title: "Error", description: "Failed to update student.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDeleteStudent = async (studentId: string) => {
@@ -353,67 +490,420 @@ const AdminStudents = () => {
 
       {/* ADD STUDENT DIALOG */}
       <Dialog open={isAddStudentDialogOpen} onOpenChange={setIsAddStudentDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add New Student</DialogTitle>
-            <DialogDescription>
-              Fill in the student details below
-            </DialogDescription>
-          </DialogHeader>
-            <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium mb-2 block">Name</label>
-              <Input placeholder="Student Name" value={formName} onChange={e => setFormName(e.target.value)} className="text-sm sm:text-base" />
+        <DialogContent className="p-0 sm:max-w-lg">
+          <div className="flex max-h-[85vh] flex-col">
+            <DialogHeader className="px-6 pt-6 pb-3">
+              <DialogTitle>Add New Student</DialogTitle>
+              <DialogDescription>Fill in the student details below</DialogDescription>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto px-6 pb-4">
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-800">Name</label>
+                    <Input
+                      placeholder="Student Name"
+                      value={formName}
+                      onChange={(e) => setFormName(e.target.value)}
+                      className="h-11 rounded-xl bg-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-800">Phone No.</label>
+                    <Input
+                      placeholder="+91 98765 43210"
+                      value={formPhone}
+                      onChange={(e) => setFormPhone(e.target.value)}
+                      className="h-11 rounded-xl bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-800">Email ID</label>
+                  <Input
+                    type="email"
+                    placeholder="student@example.com"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    className="h-11 rounded-xl bg-white"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-800">Batch</label>
+                  <select
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
+                    value={formBatchId}
+                    onChange={(e) => setFormBatchId(e.target.value)}
+                  >
+                    <option value="">Select batch</option>
+                    {batches.map((batch) => (
+                      <option key={batch.id} value={batch.id}>
+                        {batch.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-800">Father Name</label>
+                    <Input
+                      placeholder="Father Name"
+                      value={formFatherName}
+                      onChange={(e) => setFormFatherName(e.target.value)}
+                      className="h-11 rounded-xl bg-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-800">Mother Name</label>
+                    <Input
+                      placeholder="Mother Name"
+                      value={formMotherName}
+                      onChange={(e) => setFormMotherName(e.target.value)}
+                      className="h-11 rounded-xl bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-800">Parent Email Address</label>
+                    <Input
+                      type="email"
+                      placeholder="parent@example.com"
+                      value={formParentEmail}
+                      onChange={(e) => setFormParentEmail(e.target.value)}
+                      className="h-11 rounded-xl bg-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-800">Parent Mobile Number</label>
+                    <Input
+                      placeholder="+91 98765 43210"
+                      value={formParentPhone}
+                      onChange={(e) => setFormParentPhone(e.target.value)}
+                      className="h-11 rounded-xl bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-800">Address</label>
+                  <Input
+                    placeholder="Address"
+                    value={formAddress}
+                    onChange={(e) => setFormAddress(e.target.value)}
+                    className="h-11 rounded-xl bg-white"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-800">School</label>
+                  <Input
+                    placeholder="School"
+                    value={formSchool}
+                    onChange={(e) => setFormSchool(e.target.value)}
+                    className="h-11 rounded-xl bg-white"
+                  />
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="text-sm font-medium mb-2 block">Email</label>
-              <Input type="email" placeholder="student@example.com" value={formEmail} onChange={e => setFormEmail(e.target.value)} className="text-sm sm:text-base" />
-            </div>
-            <div>
-              <label className="text-sm font-medium mb-2 block">Phone</label>
-              <Input placeholder="+91 98765 43210" value={formPhone} onChange={e => setFormPhone(e.target.value)} className="text-sm sm:text-base" />
-            </div>
-            <div>
-              <label className="text-sm font-medium mb-2 block">Batch</label>
-              <select className="w-full px-3 py-2 rounded-lg border bg-background text-sm sm:text-base" value={formBatchId} onChange={e => setFormBatchId(e.target.value)}>
-                <option value="">Select batch</option>
-                {batches.map(batch => (
-                  <option key={batch.id} value={batch.id}>{batch.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium mb-2 block">Parent</label>
-              <select
-                className="w-full px-3 py-2 rounded-lg border bg-background text-sm sm:text-base"
-                value={formParentId}
-                onChange={(e) => setFormParentId(e.target.value)}
-              >
-                <option value="">Select parent</option>
-                {parents.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.email})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2 justify-end pt-4">
-              <Button 
-                variant="outline" 
+
+            <div className="flex flex-col sm:flex-row gap-2 justify-end border-t border-slate-100 px-6 py-4">
+              <Button
+                variant="outline"
                 onClick={() => {
                   setIsAddStudentDialogOpen(false);
                   resetForm();
                 }}
-                className="w-full sm:w-auto text-sm sm:text-base"
+                className="w-full sm:w-auto rounded-xl"
               >
                 Cancel
               </Button>
-              <Button 
+              <Button
                 onClick={handleSaveStudent}
                 disabled={loading}
-                className="w-full sm:w-auto text-sm sm:text-base"
+                className="w-full sm:w-auto rounded-xl bg-[#2563EB] text-white hover:bg-[#2563EB]/90"
               >
-                {loading ? 'Adding...' : 'Add Student'}
+                {loading ? "Adding..." : "Add Student"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* VIEW STUDENT DIALOG */}
+      <Dialog
+        open={isViewStudentDialogOpen}
+        onOpenChange={(open) => {
+          setIsViewStudentDialogOpen(open);
+        }}
+      >
+        <DialogContent className="p-0 sm:max-w-lg">
+          <div className="flex max-h-[85vh] flex-col">
+            <DialogHeader className="px-6 pt-6 pb-3">
+              <DialogTitle>Student Details</DialogTitle>
+              <DialogDescription>View student information</DialogDescription>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto px-6 pb-4">
+              {!selectedStudent ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+                  Student not found.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500">Name</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">{selectedStudent.name}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500">Batch</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
+                        {batchNameById(selectedStudent.batchId)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500">Email</div>
+                      <div className="mt-1 text-sm text-slate-900 break-all">{selectedStudent.email || "-"}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500">Phone</div>
+                      <div className="mt-1 text-sm text-slate-900">{selectedStudent.phone || "-"}</div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500">Enrollment Date</div>
+                      <div className="mt-1 text-sm text-slate-900">
+                        {selectedStudent.enrollmentDate
+                          ? new Date(selectedStudent.enrollmentDate).toLocaleDateString("en-IN", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })
+                          : "-"}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500">Status</div>
+                      <div className="mt-2">
+                        <StatusBadge status={selectedStudent.status} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500">Father Name</div>
+                      <div className="mt-1 text-sm text-slate-900">{selectedStudent.fatherName || "-"}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500">Mother Name</div>
+                      <div className="mt-1 text-sm text-slate-900">{selectedStudent.motherName || "-"}</div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500">Parent Email</div>
+                      <div className="mt-1 text-sm text-slate-900 break-all">{selectedStudent.parentEmail || "-"}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500">Parent Mobile</div>
+                      <div className="mt-1 text-sm text-slate-900">{selectedStudent.parentPhone || "-"}</div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="text-xs font-semibold text-slate-500">Address</div>
+                    <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{selectedStudent.address || "-"}</div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="text-xs font-semibold text-slate-500">School</div>
+                    <div className="mt-1 text-sm text-slate-900">{selectedStudent.school || "-"}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 justify-end border-t border-slate-100 px-6 py-4">
+              <Button
+                variant="outline"
+                onClick={() => setIsViewStudentDialogOpen(false)}
+                className="w-full sm:w-auto rounded-xl"
+              >
+                Close
+              </Button>
+              {selectedStudent ? (
+                <Button
+                  onClick={() => {
+                    setIsViewStudentDialogOpen(false);
+                    handleEditStudent(selectedStudent.id);
+                  }}
+                  className="w-full sm:w-auto rounded-xl bg-[#2563EB] text-white hover:bg-[#2563EB]/90"
+                >
+                  Edit
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* EDIT STUDENT DIALOG */}
+      <Dialog
+        open={isEditStudentDialogOpen}
+        onOpenChange={(open) => {
+          setIsEditStudentDialogOpen(open);
+        }}
+      >
+        <DialogContent className="p-0 sm:max-w-lg">
+          <div className="flex max-h-[85vh] flex-col">
+            <DialogHeader className="px-6 pt-6 pb-3">
+              <DialogTitle>Edit Student</DialogTitle>
+              <DialogDescription>Update student information</DialogDescription>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto px-6 pb-4">
+              {!selectedStudent ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+                  Student not found.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-800">Name</label>
+                      <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="h-11 rounded-xl bg-white" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-800">Batch</label>
+                      <select
+                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
+                        value={editBatchId}
+                        onChange={(e) => setEditBatchId(e.target.value)}
+                      >
+                        <option value="">Select batch</option>
+                        {batches.map((batch) => (
+                          <option key={batch.id} value={batch.id}>
+                            {batch.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-800">Email ID</label>
+                      <Input
+                        type="email"
+                        value={editEmail}
+                        onChange={(e) => setEditEmail(e.target.value)}
+                        className="h-11 rounded-xl bg-white"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-800">Phone No.</label>
+                      <Input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} className="h-11 rounded-xl bg-white" />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-800">Father Name</label>
+                      <Input
+                        value={editFatherName}
+                        onChange={(e) => setEditFatherName(e.target.value)}
+                        className="h-11 rounded-xl bg-white"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-800">Mother Name</label>
+                      <Input
+                        value={editMotherName}
+                        onChange={(e) => setEditMotherName(e.target.value)}
+                        className="h-11 rounded-xl bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-800">Parent Email Address</label>
+                      <Input
+                        type="email"
+                        value={editParentEmail}
+                        onChange={(e) => setEditParentEmail(e.target.value)}
+                        className="h-11 rounded-xl bg-white"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-800">Parent Mobile Number</label>
+                      <Input
+                        value={editParentPhone}
+                        onChange={(e) => setEditParentPhone(e.target.value)}
+                        className="h-11 rounded-xl bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-800">Address</label>
+                    <Input value={editAddress} onChange={(e) => setEditAddress(e.target.value)} className="h-11 rounded-xl bg-white" />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-800">School</label>
+                    <Input value={editSchool} onChange={(e) => setEditSchool(e.target.value)} className="h-11 rounded-xl bg-white" />
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-800">Status</label>
+                      <select
+                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
+                        value={editStatus}
+                        onChange={(e) => setEditStatus(e.target.value as Student["status"])}
+                      >
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-800">Enrollment Date</label>
+                      <Input value={selectedStudent.enrollmentDate} disabled className="h-11 rounded-xl bg-white" />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 justify-end border-t border-slate-100 px-6 py-4">
+              <Button
+                variant="outline"
+                onClick={() => setIsEditStudentDialogOpen(false)}
+                className="w-full sm:w-auto rounded-xl"
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveEditStudent}
+                className="w-full sm:w-auto rounded-xl bg-[#2563EB] text-white hover:bg-[#2563EB]/90"
+                disabled={loading}
+              >
+                {loading ? "Saving..." : "Save Changes"}
               </Button>
             </div>
           </div>

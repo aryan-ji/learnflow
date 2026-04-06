@@ -1,17 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, Lock, Mail, Sparkles } from "lucide-react";
+import { ArrowLeft, Building2, Lock, Mail, Sparkles } from "lucide-react";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getActiveInstituteId } from "@/lib/tenant";
 
 const LOGO_SRC = "/instipilot-mark.png"; // Recommended: place your logo at `public/instipilot-mark.png`
 const LOGO_FALLBACK_SRC = "/learnflow-mark.png"; // Backwards-compatible fallback
 
 export default function Login() {
+  const [instituteId, setInstituteId] = useState(import.meta.env.VITE_INSTITUTE_ID ?? "inst_1");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -29,17 +31,21 @@ export default function Login() {
     setPassword("demo123");
   };
 
+  useEffect(() => {
+    const stored = getActiveInstituteId();
+    if (stored) setInstituteId(stored);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    const success = await login(email, password);
-    if (success) {
+    const user = await login(email, password, instituteId);
+    if (user) {
       toast.success("Welcome back!");
-      const user = (await import("@/data/mockData")).mockUsers.find((u) => u.email.toLowerCase() === email.toLowerCase());
-      if (user) navigate(`/${user.role}`);
+      navigate(`/${user.role}`);
     } else {
-      toast.error("Invalid credentials. Try one of the demo accounts.");
+      toast.error("Invalid credentials. Check institute code and email (or try a demo account).");
     }
 
     setIsLoading(false);
@@ -84,6 +90,24 @@ export default function Login() {
             <p className="mt-2 text-sm text-slate-600">Use your email and password, or try a demo account.</p>
 
             <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+              <div className="space-y-2">
+                <Label htmlFor="institute" className="text-sm font-semibold text-slate-800">
+                  Institute Code
+                </Label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                  <Input
+                    id="institute"
+                    placeholder="e.g. inst_1"
+                    value={instituteId}
+                    onChange={(e) => setInstituteId(e.target.value)}
+                    className="h-12 rounded-xl border-slate-200 bg-white pl-10 focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                    required
+                  />
+                </div>
+                <p className="text-xs text-slate-500">Ask your admin for this code (each institute has its own).</p>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-sm font-semibold text-slate-800">
                   Email

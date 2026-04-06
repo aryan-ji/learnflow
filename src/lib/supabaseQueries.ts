@@ -1,7 +1,8 @@
 import { supabase } from '@/lib/supabase';
+import { getActiveInstituteId } from "@/lib/tenant";
 import { User, Student, Batch, Teacher, Attendance, Test, TestResult, Fee } from '@/types';
 
-const INSTITUTE_ID: string = import.meta.env.VITE_INSTITUTE_ID ?? "inst_1";
+const instituteId = () => getActiveInstituteId() ?? (import.meta.env.VITE_INSTITUTE_ID ?? "inst_1");
 
 type DbUser = {
   id: string;
@@ -16,6 +17,12 @@ type DbStudent = {
   name: string;
   email: string;
   phone: string;
+  mother_name?: string | null;
+  father_name?: string | null;
+  parent_phone?: string | null;
+  parent_email?: string | null;
+  address?: string | null;
+  school?: string | null;
   batch_id: string;
   parent_id: string;
   enrollment_date: string;
@@ -98,6 +105,12 @@ const mapStudent = (row: DbStudent): Student => ({
   parentId: row.parent_id,
   enrollmentDate: row.enrollment_date,
   status: row.status,
+  motherName: row.mother_name ?? undefined,
+  fatherName: row.father_name ?? undefined,
+  parentPhone: row.parent_phone ?? undefined,
+  parentEmail: row.parent_email ?? undefined,
+  address: row.address ?? undefined,
+  school: row.school ?? undefined,
 });
 
 const mapBatch = (row: DbBatch): Batch => ({
@@ -158,7 +171,7 @@ export const getInstituteSettings = async (): Promise<{ hideFeeAmounts: boolean 
   const { data, error } = await supabase
     .from("institutes")
     .select("hide_fee_amounts")
-    .eq("id", INSTITUTE_ID)
+    .eq("id", instituteId())
     .single();
   if (error) {
     if ((error as any)?.code === "PGRST204") {
@@ -179,7 +192,7 @@ export const updateInstituteHideFeeAmounts = async (hideFeeAmounts: boolean): Pr
   const { error } = await supabase
     .from("institutes")
     .update({ hide_fee_amounts: hideFeeAmounts })
-    .eq("id", INSTITUTE_ID);
+    .eq("id", instituteId());
   if (error) {
     if ((error as any)?.code === "PGRST204") {
       console.error(
@@ -196,7 +209,7 @@ export const updateInstituteHideFeeAmounts = async (hideFeeAmounts: boolean): Pr
 
 // Users
 export const getUsers = async (): Promise<User[]> => {
-  const { data, error } = await supabase.from('users').select('*').eq("institute_id", INSTITUTE_ID);
+  const { data, error } = await supabase.from('users').select('*').eq("institute_id", instituteId());
   if (error) {
     console.error('Error fetching users:', error);
     return [];
@@ -205,7 +218,7 @@ export const getUsers = async (): Promise<User[]> => {
 };
 
 export const getUserById = async (id: string): Promise<User | null> => {
-  const { data, error } = await supabase.from('users').select('*').eq("institute_id", INSTITUTE_ID).eq('id', id).single();
+  const { data, error } = await supabase.from('users').select('*').eq("institute_id", instituteId()).eq('id', id).single();
   if (error) {
     console.error('Error fetching user:', error);
     return null;
@@ -216,7 +229,7 @@ export const getUserById = async (id: string): Promise<User | null> => {
 export const createUser = async (user: User): Promise<User | null> => {
   const payload = {
     id: user.id,
-    institute_id: INSTITUTE_ID,
+    institute_id: instituteId(),
     name: user.name,
     email: user.email,
     role: user.role,
@@ -230,9 +243,95 @@ export const createUser = async (user: User): Promise<User | null> => {
   return data ? mapUser(data as DbUser) : null;
 };
 
+export const getOrCreateParentUserByEmail = async (params: {
+  parentEmail: string;
+  parentName: string;
+}): Promise<User | null> => {
+  const parentEmail = params.parentEmail.trim().toLowerCase();
+  const parentName = params.parentName.trim();
+  if (!parentEmail) return null;
+
+  const { data: existing, error: existingError } = await supabase
+    .from("users")
+    .select("*")
+    .eq("institute_id", instituteId())
+    .eq("role", "parent")
+    .eq("email", parentEmail)
+    .maybeSingle();
+
+  if (existingError) {
+    console.error("Error fetching parent user:", existingError);
+    return null;
+  }
+
+  if (existing) return mapUser(existing as DbUser);
+
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? `u-${crypto.randomUUID()}`
+      : `u-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const payload = {
+    id,
+    institute_id: instituteId(),
+    name: parentName || "Parent",
+    email: parentEmail,
+    role: "parent",
+    avatar: null,
+  };
+
+  const { data, error } = await supabase.from("users").insert([payload]).select().single();
+  if (error) {
+    console.error("Error creating parent user:", error);
+    return null;
+  }
+  return data ? mapUser(data as DbUser) : null;
+};
+
+export const getOrCreateUnassignedParentUser = async (): Promise<User | null> => {
+  const iid = instituteId();
+  const email = `unassigned-parent@${iid}.local`;
+
+  const { data: existing, error: existingError } = await supabase
+    .from("users")
+    .select("*")
+    .eq("institute_id", iid)
+    .eq("role", "parent")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (existingError) {
+    console.error("Error fetching unassigned parent user:", existingError);
+    return null;
+  }
+
+  if (existing) return mapUser(existing as DbUser);
+
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? `u-${crypto.randomUUID()}`
+      : `u-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const payload = {
+    id,
+    institute_id: iid,
+    name: "Unassigned Parent",
+    email,
+    role: "parent",
+    avatar: null,
+  };
+
+  const { data, error } = await supabase.from("users").insert([payload]).select().single();
+  if (error) {
+    console.error("Error creating unassigned parent user:", error);
+    return null;
+  }
+  return data ? mapUser(data as DbUser) : null;
+};
+
 // Students
 export const getStudents = async (): Promise<Student[]> => {
-  const { data, error } = await supabase.from('students').select('*').eq("institute_id", INSTITUTE_ID);
+  const { data, error } = await supabase.from('students').select('*').eq("institute_id", instituteId());
   if (error) {
     console.error('Error fetching students:', error);
     return [];
@@ -241,9 +340,9 @@ export const getStudents = async (): Promise<Student[]> => {
 };
 
 export const createStudent = async (student: Student): Promise<Student | null> => {
-  const payload = {
+  const payload: any = {
     id: student.id,
-    institute_id: INSTITUTE_ID,
+    institute_id: instituteId(),
     name: student.name,
     email: student.email,
     phone: student.phone,
@@ -252,16 +351,89 @@ export const createStudent = async (student: Student): Promise<Student | null> =
     enrollment_date: student.enrollmentDate,
     status: student.status,
   };
+
+  // Optional columns (kept conditional so older DB schemas won't 400 on unknown columns)
+  if (student.motherName) payload.mother_name = student.motherName;
+  if (student.fatherName) payload.father_name = student.fatherName;
+  if (student.parentPhone) payload.parent_phone = student.parentPhone;
+  if (student.parentEmail) payload.parent_email = student.parentEmail;
+  if (student.address) payload.address = student.address;
+  if (student.school) payload.school = student.school;
+
   const { data, error } = await supabase.from('students').insert([payload]).select().single();
   if (error) {
-    console.error('Error creating student:', error);
+    console.error('Error creating student:', {
+      code: (error as any)?.code,
+      message: (error as any)?.message,
+      details: (error as any)?.details,
+      hint: (error as any)?.hint,
+    });
     return null;
   }
   return data ? mapStudent(data as DbStudent) : null;
 };
 
+export const updateStudent = async (params: {
+  id: string;
+  name: string;
+  batchId: string;
+  email?: string;
+  phone?: string;
+  parentId: string;
+  enrollmentDate: string;
+  status: Student["status"];
+  motherName?: string;
+  fatherName?: string;
+  parentPhone?: string;
+  parentEmail?: string;
+  address?: string;
+  school?: string;
+}): Promise<Student | null> => {
+  const cleanEmail = (params.email ?? "").trim();
+  const cleanPhone = (params.phone ?? "").trim();
+  const fallbackEmail = `${params.id}@student.local`;
+
+  const payload: any = {
+    name: params.name,
+    email: cleanEmail || fallbackEmail,
+    phone: cleanPhone,
+    batch_id: params.batchId,
+    parent_id: params.parentId,
+    enrollment_date: params.enrollmentDate,
+    status: params.status,
+  };
+
+  // Optional columns (kept conditional so older DB schemas won't 400 on unknown columns)
+  if (params.motherName) payload.mother_name = params.motherName;
+  if (params.fatherName) payload.father_name = params.fatherName;
+  if (params.parentPhone) payload.parent_phone = params.parentPhone;
+  if (params.parentEmail) payload.parent_email = params.parentEmail;
+  if (params.address) payload.address = params.address;
+  if (params.school) payload.school = params.school;
+
+  const { data, error } = await supabase
+    .from("students")
+    .update(payload)
+    .eq("institute_id", instituteId())
+    .eq("id", params.id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Error updating student:", {
+      code: (error as any)?.code,
+      message: (error as any)?.message,
+      details: (error as any)?.details,
+      hint: (error as any)?.hint,
+    });
+    return null;
+  }
+
+  return data ? mapStudent(data as DbStudent) : null;
+};
+
 export const getStudentById = async (id: string): Promise<Student | null> => {
-  const { data, error } = await supabase.from('students').select('*').eq("institute_id", INSTITUTE_ID).eq('id', id).single();
+  const { data, error } = await supabase.from('students').select('*').eq("institute_id", instituteId()).eq('id', id).single();
   if (error) {
     console.error('Error fetching student:', error);
     return null;
@@ -270,7 +442,7 @@ export const getStudentById = async (id: string): Promise<Student | null> => {
 };
 
 export const getStudentsByParent = async (parentId: string): Promise<Student[]> => {
-  const { data, error } = await supabase.from('students').select('*').eq("institute_id", INSTITUTE_ID).eq('parent_id', parentId);
+  const { data, error } = await supabase.from('students').select('*').eq("institute_id", instituteId()).eq('parent_id', parentId);
   if (error) {
     console.error('Error fetching students by parent:', error);
     return [];
@@ -279,7 +451,7 @@ export const getStudentsByParent = async (parentId: string): Promise<Student[]> 
 };
 
 export const getStudentsByBatch = async (batchId: string): Promise<Student[]> => {
-  const { data, error } = await supabase.from("students").select("*").eq("institute_id", INSTITUTE_ID).eq("batch_id", batchId);
+  const { data, error } = await supabase.from("students").select("*").eq("institute_id", instituteId()).eq("batch_id", batchId);
   if (error) {
     console.error("Error fetching students by batch:", error);
     return [];
@@ -289,7 +461,7 @@ export const getStudentsByBatch = async (batchId: string): Promise<Student[]> =>
 
 // Batches
 export const getBatches = async (): Promise<Batch[]> => {
-  const { data, error } = await supabase.from('batches').select('*').eq("institute_id", INSTITUTE_ID);
+  const { data, error } = await supabase.from('batches').select('*').eq("institute_id", instituteId());
   if (error) {
     console.error('Error fetching batches:', error);
     return [];
@@ -301,7 +473,7 @@ export const getBatchesByTeacher = async (teacherId: string): Promise<Batch[]> =
   const { data, error } = await supabase
     .from("batches")
     .select("*")
-    .eq("institute_id", INSTITUTE_ID)
+    .eq("institute_id", instituteId())
     .eq("teacher_id", teacherId);
   if (error) {
     console.error("Error fetching batches by teacher:", error);
@@ -311,7 +483,7 @@ export const getBatchesByTeacher = async (teacherId: string): Promise<Batch[]> =
 };
 
 export const getBatchById = async (id: string): Promise<Batch | null> => {
-  const { data, error } = await supabase.from('batches').select('*').eq("institute_id", INSTITUTE_ID).eq('id', id).single();
+  const { data, error } = await supabase.from('batches').select('*').eq("institute_id", instituteId()).eq('id', id).single();
   if (error) {
     console.error('Error fetching batch:', error);
     return null;
@@ -322,7 +494,7 @@ export const getBatchById = async (id: string): Promise<Batch | null> => {
 export const createBatch = async (batch: Batch): Promise<Batch | null> => {
   const payload = {
     id: batch.id,
-    institute_id: INSTITUTE_ID,
+    institute_id: instituteId(),
     name: batch.name,
     subject: batch.subject,
     teacher_id: batch.teacherId,
@@ -339,7 +511,7 @@ export const createBatch = async (batch: Batch): Promise<Batch | null> => {
 
 // Teachers
 export const getTeachers = async (): Promise<Teacher[]> => {
-  const { data, error } = await supabase.from('teachers').select('*').eq("institute_id", INSTITUTE_ID);
+  const { data, error } = await supabase.from('teachers').select('*').eq("institute_id", instituteId());
   if (error) {
     console.error('Error fetching teachers:', error);
     return [];
@@ -348,7 +520,7 @@ export const getTeachers = async (): Promise<Teacher[]> => {
 };
 
 export const getTeacherById = async (id: string): Promise<Teacher | null> => {
-  const { data, error } = await supabase.from('teachers').select('*').eq("institute_id", INSTITUTE_ID).eq('id', id).single();
+  const { data, error } = await supabase.from('teachers').select('*').eq("institute_id", instituteId()).eq('id', id).single();
   if (error) {
     console.error('Error fetching teacher:', error);
     return null;
@@ -359,7 +531,7 @@ export const getTeacherById = async (id: string): Promise<Teacher | null> => {
 export const createTeacher = async (teacher: Teacher): Promise<Teacher | null> => {
   const payload = {
     id: teacher.id,
-    institute_id: INSTITUTE_ID,
+    institute_id: instituteId(),
     name: teacher.name,
     email: teacher.email,
     phone: teacher.phone,
@@ -376,7 +548,7 @@ export const createTeacher = async (teacher: Teacher): Promise<Teacher | null> =
 
 // Attendance
 export const getAttendance = async (): Promise<Attendance[]> => {
-  const { data, error } = await supabase.from('attendance').select('*').eq("institute_id", INSTITUTE_ID);
+  const { data, error } = await supabase.from('attendance').select('*').eq("institute_id", instituteId());
   if (error) {
     console.error('Error fetching attendance:', error);
     return [];
@@ -385,7 +557,7 @@ export const getAttendance = async (): Promise<Attendance[]> => {
 };
 
 export const getAttendanceByStudent = async (studentId: string): Promise<Attendance[]> => {
-  const { data, error } = await supabase.from('attendance').select('*').eq("institute_id", INSTITUTE_ID).eq('student_id', studentId);
+  const { data, error } = await supabase.from('attendance').select('*').eq("institute_id", instituteId()).eq('student_id', studentId);
   if (error) {
     console.error('Error fetching student attendance:', error);
     return [];
@@ -394,7 +566,7 @@ export const getAttendanceByStudent = async (studentId: string): Promise<Attenda
 };
 
 export const getAttendanceByBatch = async (batchId: string): Promise<Attendance[]> => {
-  const { data, error } = await supabase.from('attendance').select('*').eq("institute_id", INSTITUTE_ID).eq('batch_id', batchId);
+  const { data, error } = await supabase.from('attendance').select('*').eq("institute_id", instituteId()).eq('batch_id', batchId);
   if (error) {
     console.error('Error fetching batch attendance:', error);
     return [];
@@ -411,7 +583,7 @@ export const getAttendanceByBatchDateRange = async (params: {
   const { data, error } = await supabase
     .from("attendance")
     .select("*")
-    .eq("institute_id", INSTITUTE_ID)
+    .eq("institute_id", instituteId())
     .eq("batch_id", batchId)
     .gte("date", startDate)
     .lte("date", endDate);
@@ -426,7 +598,7 @@ export const getAttendanceByBatchDate = async (batchId: string, date: string): P
   const { data, error } = await supabase
     .from("attendance")
     .select("*")
-    .eq("institute_id", INSTITUTE_ID)
+    .eq("institute_id", instituteId())
     .eq("batch_id", batchId)
     .eq("date", date);
   if (error) {
@@ -444,7 +616,7 @@ export const upsertAttendanceForBatchDate = async (params: {
   const { batchId, date, entries } = params;
   const payload = entries.map((e) => ({
     id: `${batchId}-${e.studentId}-${date}`,
-    institute_id: INSTITUTE_ID,
+    institute_id: instituteId(),
     batch_id: batchId,
     student_id: e.studentId,
     date,
@@ -466,7 +638,7 @@ export const deleteStudent = async (studentId: string): Promise<boolean> => {
   const { error } = await supabase
     .from("students")
     .delete()
-    .eq("institute_id", INSTITUTE_ID)
+    .eq("institute_id", instituteId())
     .eq("id", studentId);
   if (error) {
     console.error("Error deleting student:", error);
@@ -478,7 +650,7 @@ export const deleteStudent = async (studentId: string): Promise<boolean> => {
 export const addAttendance = async (attendance: Omit<Attendance, 'id'>): Promise<Attendance | null> => {
   const payload = {
     id: `${attendance.batchId}-${attendance.studentId}-${attendance.date}`,
-    institute_id: INSTITUTE_ID,
+    institute_id: instituteId(),
     student_id: attendance.studentId,
     batch_id: attendance.batchId,
     date: attendance.date,
@@ -494,7 +666,7 @@ export const addAttendance = async (attendance: Omit<Attendance, 'id'>): Promise
 
 // Tests
 export const getTests = async (): Promise<Test[]> => {
-  const { data, error } = await supabase.from('tests').select('*').eq("institute_id", INSTITUTE_ID);
+  const { data, error } = await supabase.from('tests').select('*').eq("institute_id", instituteId());
   if (error) {
     console.error('Error fetching tests:', error);
     return [];
@@ -503,7 +675,7 @@ export const getTests = async (): Promise<Test[]> => {
 };
 
 export const getTestById = async (id: string): Promise<Test | null> => {
-  const { data, error } = await supabase.from('tests').select('*').eq("institute_id", INSTITUTE_ID).eq('id', id).single();
+  const { data, error } = await supabase.from('tests').select('*').eq("institute_id", instituteId()).eq('id', id).single();
   if (error) {
     console.error('Error fetching test:', error);
     return null;
@@ -512,7 +684,7 @@ export const getTestById = async (id: string): Promise<Test | null> => {
 };
 
 export const getTestsByBatch = async (batchId: string): Promise<Test[]> => {
-  const { data, error } = await supabase.from('tests').select('*').eq("institute_id", INSTITUTE_ID).eq('batch_id', batchId);
+  const { data, error } = await supabase.from('tests').select('*').eq("institute_id", instituteId()).eq('batch_id', batchId);
   if (error) {
     console.error('Error fetching batch tests:', error);
     return [];
@@ -523,7 +695,7 @@ export const getTestsByBatch = async (batchId: string): Promise<Test[]> => {
 export const createTest = async (test: Test): Promise<Test | null> => {
   const payload = {
     id: test.id,
-    institute_id: INSTITUTE_ID,
+    institute_id: instituteId(),
     name: test.name,
     batch_id: test.batchId,
     subject: test.subject,
@@ -540,7 +712,7 @@ export const createTest = async (test: Test): Promise<Test | null> => {
 
 // Test Results
 export const getTestResults = async (): Promise<TestResult[]> => {
-  const { data, error } = await supabase.from('test_results').select('*').eq("institute_id", INSTITUTE_ID);
+  const { data, error } = await supabase.from('test_results').select('*').eq("institute_id", instituteId());
   if (error) {
     console.error('Error fetching test results:', error);
     return [];
@@ -549,7 +721,7 @@ export const getTestResults = async (): Promise<TestResult[]> => {
 };
 
 export const getTestResultsByStudent = async (studentId: string): Promise<TestResult[]> => {
-  const { data, error } = await supabase.from('test_results').select('*').eq("institute_id", INSTITUTE_ID).eq('student_id', studentId);
+  const { data, error } = await supabase.from('test_results').select('*').eq("institute_id", instituteId()).eq('student_id', studentId);
   if (error) {
     console.error('Error fetching student test results:', error);
     return [];
@@ -558,7 +730,7 @@ export const getTestResultsByStudent = async (studentId: string): Promise<TestRe
 };
 
 export const getTestResultsByTest = async (testId: string): Promise<TestResult[]> => {
-  const { data, error } = await supabase.from('test_results').select('*').eq("institute_id", INSTITUTE_ID).eq('test_id', testId);
+  const { data, error } = await supabase.from('test_results').select('*').eq("institute_id", instituteId()).eq('test_id', testId);
   if (error) {
     console.error('Error fetching test results:', error);
     return [];
@@ -569,7 +741,7 @@ export const getTestResultsByTest = async (testId: string): Promise<TestResult[]
 export const addTestResult = async (result: Omit<TestResult, 'id'>): Promise<TestResult | null> => {
   const payload = {
     id: `${result.testId}-${result.studentId}`,
-    institute_id: INSTITUTE_ID,
+    institute_id: instituteId(),
     test_id: result.testId,
     student_id: result.studentId,
     marks_obtained: result.marksObtained,
@@ -585,7 +757,7 @@ export const addTestResult = async (result: Omit<TestResult, 'id'>): Promise<Tes
 
 // Fees
 export const getFees = async (): Promise<Fee[]> => {
-  const { data, error } = await supabase.from('fees').select('*').eq("institute_id", INSTITUTE_ID);
+  const { data, error } = await supabase.from('fees').select('*').eq("institute_id", instituteId());
   if (error) {
     console.error('Error fetching fees:', error);
     return [];
@@ -594,7 +766,7 @@ export const getFees = async (): Promise<Fee[]> => {
 };
 
 export const getFeesByStudent = async (studentId: string): Promise<Fee[]> => {
-  const { data, error } = await supabase.from('fees').select('*').eq("institute_id", INSTITUTE_ID).eq('student_id', studentId);
+  const { data, error } = await supabase.from('fees').select('*').eq("institute_id", instituteId()).eq('student_id', studentId);
   if (error) {
     console.error('Error fetching student fees:', error);
     return [];
@@ -613,7 +785,7 @@ export const getFeesForStudentsByDueDateRange = async (params: {
   const { data, error } = await supabase
     .from("fees")
     .select("*")
-    .eq("institute_id", INSTITUTE_ID)
+    .eq("institute_id", instituteId())
     .in("student_id", studentIds)
     .gte("due_date", startDate)
     .lte("due_date", endDate);
@@ -629,7 +801,7 @@ export const getFeesForStudents = async (studentIds: string[]): Promise<Fee[]> =
   const { data, error } = await supabase
     .from("fees")
     .select("*")
-    .eq("institute_id", INSTITUTE_ID)
+    .eq("institute_id", instituteId())
     .in("student_id", studentIds);
   if (error) {
     console.error("Error fetching fees for students:", error);
@@ -653,7 +825,7 @@ export const updateFeeStatus = async (
   const { data, error } = await supabase
     .from("fees")
     .update(updateData)
-    .eq("institute_id", INSTITUTE_ID)
+    .eq("institute_id", instituteId())
     .eq("id", feeId)
     .select()
     .single();
@@ -667,7 +839,7 @@ export const updateFeeStatus = async (
 export const createFee = async (fee: Fee): Promise<Fee | null> => {
   const payload = {
     id: fee.id,
-    institute_id: INSTITUTE_ID,
+    institute_id: instituteId(),
     student_id: fee.studentId,
     month: fee.month,
     amount: fee.amount,
@@ -687,7 +859,7 @@ export const upsertFees = async (fees: Fee[]): Promise<Fee[]> => {
   if (fees.length === 0) return [];
   const payloads = fees.map((fee) => ({
     id: fee.id,
-    institute_id: INSTITUTE_ID,
+    institute_id: instituteId(),
     student_id: fee.studentId,
     month: fee.month,
     amount: fee.amount,
