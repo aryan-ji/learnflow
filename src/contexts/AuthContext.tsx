@@ -3,10 +3,13 @@ import { User } from '@/types';
 import { supabase } from "@/lib/supabase";
 import { clearActiveInstituteId, getActiveInstituteId, setActiveInstituteId } from "@/lib/tenant";
 
+type InstituteChoice = { id: string; name: string; role: User["role"] };
+type LoginNeedsInstitute = { needsInstitute: true; institutes: InstituteChoice[] };
+
 interface AuthContextType {
   user: User | null;
   instituteId: string | null;
-  login: (email: string, password: string, instituteId: string) => Promise<User | null>;
+  login: (email: string, password: string, instituteId?: string) => Promise<User | LoginNeedsInstitute | null>;
   logout: () => void;
   isAuthenticated: boolean;
 }
@@ -19,36 +22,85 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     getActiveInstituteId() ?? (import.meta.env.VITE_INSTITUTE_ID ?? null),
   );
 
-  const login = async (email: string, _password: string, nextInstituteId: string): Promise<User | null> => {
+  const login = async (email: string, _password: string, nextInstituteId?: string): Promise<User | LoginNeedsInstitute | null> => {
     const cleanEmail = email.trim();
-    const cleanInstituteId = nextInstituteId.trim();
-    if (!cleanEmail || !cleanInstituteId) return null;
+    const cleanInstituteId = nextInstituteId?.trim() ?? "";
+    if (!cleanEmail) return null;
 
-    const { data, error } = await supabase
+    if (cleanInstituteId) {
+      const { data, error } = await supabase
+        .from("users")
+        .select("id,name,email,role,avatar")
+        .eq("institute_id", cleanInstituteId)
+        .ilike("email", cleanEmail)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Login failed:", error);
+        return null;
+      }
+      if (!data) return null;
+
+      const foundUser: User = {
+        id: data.id,
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        avatar: data.avatar ?? undefined,
+      };
+
+      setActiveInstituteId(cleanInstituteId);
+      setInstituteId(cleanInstituteId);
+      setUser(foundUser);
+      return foundUser;
+    }
+
+    // No institute provided: resolve by email (if unique), otherwise ask user to choose.
+    const { data: matches, error: matchesError } = await supabase
       .from("users")
-      .select("id,name,email,role,avatar")
-      .eq("institute_id", cleanInstituteId)
-      .ilike("email", cleanEmail)
-      .maybeSingle();
+      .select("id,name,email,role,avatar,institute_id")
+      .ilike("email", cleanEmail);
 
-    if (error) {
-      console.error("Login failed:", error);
+    if (matchesError) {
+      console.error("Login resolve failed:", matchesError);
       return null;
     }
-    if (!data) return null;
 
-    const foundUser: User = {
-      id: data.id,
-      name: data.name,
-      email: data.email,
-      role: data.role,
-      avatar: data.avatar ?? undefined,
-    };
+    const rows = (matches ?? []).filter((x: any) => x?.institute_id);
+    if (rows.length === 0) return null;
 
-    setActiveInstituteId(cleanInstituteId);
-    setInstituteId(cleanInstituteId);
-    setUser(foundUser);
-    return foundUser;
+    if (rows.length === 1) {
+      const r: any = rows[0];
+      const foundUser: User = {
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        role: r.role,
+        avatar: r.avatar ?? undefined,
+      };
+      const iid = String(r.institute_id);
+      setActiveInstituteId(iid);
+      setInstituteId(iid);
+      setUser(foundUser);
+      return foundUser;
+    }
+
+    const uniqueInstituteIds = Array.from(new Set(rows.map((r: any) => String(r.institute_id))));
+    const { data: instituteRows } = await supabase
+      .from("institutes")
+      .select("id,name")
+      .in("id", uniqueInstituteIds);
+
+    const nameById = new Map<string, string>();
+    (instituteRows ?? []).forEach((r: any) => nameById.set(String(r.id), String(r.name ?? r.id)));
+
+    // We might still have multiple entries per institute (e.g., different roles); show institute+role choices.
+    const institutes: InstituteChoice[] = rows.map((r: any) => {
+      const iid = String(r.institute_id);
+      return { id: iid, name: nameById.get(iid) ?? iid, role: r.role as User["role"] };
+    });
+
+    return { needsInstitute: true, institutes };
   };
 
   const logout = () => {

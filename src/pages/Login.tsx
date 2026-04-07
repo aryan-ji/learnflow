@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, Building2, Lock, Mail, Sparkles } from "lucide-react";
+import { ArrowLeft, Lock, Mail, Sparkles } from "lucide-react";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getActiveInstituteId } from "@/lib/tenant";
@@ -13,12 +20,14 @@ const LOGO_SRC = "/instipilot-mark.png"; // Recommended: place your logo at `pub
 const LOGO_FALLBACK_SRC = "/learnflow-mark.png"; // Backwards-compatible fallback
 
 export default function Login() {
-  const [instituteId, setInstituteId] = useState(import.meta.env.VITE_INSTITUTE_ID ?? "inst_1");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [isChooseInstituteOpen, setIsChooseInstituteOpen] = useState(false);
+  const [instituteChoices, setInstituteChoices] = useState<Array<{ id: string; name: string; role: string }>>([]);
+  const [chosenInstituteId, setChosenInstituteId] = useState<string>("");
 
   const demoAccounts = [
     { role: "Admin", email: "admin@coaching.com", icon: "👑" },
@@ -33,22 +42,53 @@ export default function Login() {
 
   useEffect(() => {
     const stored = getActiveInstituteId();
-    if (stored) setInstituteId(stored);
+    if (stored) setChosenInstituteId(stored);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    const user = await login(email, password, instituteId);
+    const result = await login(email, password);
+    if (result && typeof result === "object" && "needsInstitute" in result) {
+      setInstituteChoices((result as any).institutes ?? []);
+      const firstId = (result as any).institutes?.[0]?.id ?? "";
+      setChosenInstituteId(firstId);
+      setIsChooseInstituteOpen(true);
+      setIsLoading(false);
+      return;
+    }
+
+    const user = result as any;
     if (user) {
       toast.success("Welcome back!");
       navigate(`/${user.role}`);
     } else {
-      toast.error("Invalid credentials. Check institute code and email (or try a demo account).");
+      toast.error("Invalid credentials. Check your email (or try a demo account).");
     }
 
     setIsLoading(false);
+  };
+
+  const continueWithInstitute = async () => {
+    if (!chosenInstituteId) {
+      toast.error("Please select an institute.");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const result = await login(email, password, chosenInstituteId);
+      const user = result as any;
+      if (user) {
+        toast.success("Welcome back!");
+        setIsChooseInstituteOpen(false);
+        navigate(`/${user.role}`);
+      } else {
+        toast.error("Could not sign in for the selected institute.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -90,24 +130,6 @@ export default function Login() {
             <p className="mt-2 text-sm text-slate-600">Use your email and password, or try a demo account.</p>
 
             <form onSubmit={handleSubmit} className="mt-8 space-y-5">
-              <div className="space-y-2">
-                <Label htmlFor="institute" className="text-sm font-semibold text-slate-800">
-                  Institute Code
-                </Label>
-                <div className="relative">
-                  <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                  <Input
-                    id="institute"
-                    placeholder="e.g. inst_1"
-                    value={instituteId}
-                    onChange={(e) => setInstituteId(e.target.value)}
-                    className="h-12 rounded-xl border-slate-200 bg-white pl-10 focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-                    required
-                  />
-                </div>
-                <p className="text-xs text-slate-500">Ask your admin for this code (each institute has its own).</p>
-              </div>
-
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-sm font-semibold text-slate-800">
                   Email
@@ -220,6 +242,42 @@ export default function Login() {
           </div>
         </div>
       </div>
+
+      {/* CHOOSE INSTITUTE (only if same email exists in multiple institutes) */}
+      <Dialog open={isChooseInstituteOpen} onOpenChange={setIsChooseInstituteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select your institute</DialogTitle>
+            <DialogDescription>
+              This email exists in multiple institutes. Choose the correct one to continue.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <label className="text-sm font-semibold text-slate-800">Institute</label>
+            <select
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
+              value={chosenInstituteId}
+              onChange={(e) => setChosenInstituteId(e.target.value)}
+            >
+              {instituteChoices.map((c, idx) => (
+                <option key={`${c.id}:${c.role}:${idx}`} value={c.id}>
+                  {c.name} ({c.id}) • {c.role}
+                </option>
+              ))}
+            </select>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="outline" className="rounded-xl" onClick={() => setIsChooseInstituteOpen(false)} disabled={isLoading}>
+                Cancel
+              </Button>
+              <Button className="rounded-xl bg-[#2563EB] text-white hover:bg-[#2563EB]/90" onClick={continueWithInstitute} disabled={isLoading}>
+                {isLoading ? "Signing in..." : "Continue"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
