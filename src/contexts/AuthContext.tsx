@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { User } from '@/types';
 import { supabase } from "@/lib/supabase";
+import { clearAuthSession, getAuthSession, setAuthSession } from "@/lib/authSession";
 import { clearActiveInstituteId, getActiveInstituteId, setActiveInstituteId } from "@/lib/tenant";
 
 type InstituteChoice = { id: string; name: string; role: User["role"] };
@@ -17,9 +18,10 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const session = getAuthSession();
+  const [user, setUser] = useState<User | null>(session?.user ?? null);
   const [instituteId, setInstituteId] = useState<string | null>(
-    getActiveInstituteId() ?? (import.meta.env.VITE_INSTITUTE_ID ?? null),
+    session?.instituteId ?? getActiveInstituteId() ?? (import.meta.env.VITE_INSTITUTE_ID ?? null),
   );
 
   const login = async (email: string, _password: string, nextInstituteId?: string): Promise<User | LoginNeedsInstitute | null> => {
@@ -50,6 +52,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
 
       setActiveInstituteId(cleanInstituteId);
+      setAuthSession({ instituteId: cleanInstituteId, user: foundUser, ttlDays: 30 });
       setInstituteId(cleanInstituteId);
       setUser(foundUser);
       return foundUser;
@@ -80,6 +83,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
       const iid = String(r.institute_id);
       setActiveInstituteId(iid);
+      setAuthSession({ instituteId: iid, user: foundUser, ttlDays: 30 });
       setInstituteId(iid);
       setUser(foundUser);
       return foundUser;
@@ -107,6 +111,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
     setInstituteId(null);
     clearActiveInstituteId();
+    clearAuthSession();
   };
 
   return (

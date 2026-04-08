@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Calendar, Check, Clock, CreditCard, History, Save, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { clearAttendanceDraft, loadAttendanceDraft, saveAttendanceDraft } from "@/lib/attendanceDraft";
 import {
   getAttendanceByBatch,
   getAttendanceByBatchDate,
@@ -49,6 +50,18 @@ const TeacherAttendance = () => {
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>(
     {},
   );
+  const [hasDraftRestored, setHasDraftRestored] = useState(false);
+  const [attendanceLoadedKey, setAttendanceLoadedKey] = useState<string | null>(null);
+
+  const draftRef = useRef<{
+    batchId: string;
+    date: string;
+    attendance: Record<string, AttendanceStatus>;
+  }>({
+    batchId: "",
+    date: "",
+    attendance: {},
+  });
   const [attendancePctByStudentId, setAttendancePctByStudentId] = useState<
     Record<string, number | null>
   >({});
@@ -119,18 +132,87 @@ const TeacherAttendance = () => {
     const load = async () => {
       if (!selectedBatch || !selectedDate) return;
       try {
+        setAttendanceLoadedKey(null);
         const rows = await getAttendanceByBatchDate(selectedBatch, selectedDate);
         const map: Record<string, AttendanceStatus> = {};
         for (const row of rows) {
           map[row.studentId] = row.status;
         }
-        setAttendance(map);
+
+        const draft = loadAttendanceDraft({ role: "teacher", batchId: selectedBatch, date: selectedDate });
+        if (draft && Object.keys(draft.attendance).length > 0) {
+          setAttendance({ ...map, ...draft.attendance });
+          setHasDraftRestored(true);
+        } else {
+          setAttendance(map);
+          setHasDraftRestored(false);
+        }
+        setAttendanceLoadedKey(`${selectedBatch}:${selectedDate}`);
       } catch (error) {
         console.error("Failed to load attendance:", error);
       }
     };
     load();
   }, [selectedBatch, selectedDate]);
+
+  useEffect(() => {
+    if (!hasDraftRestored) return;
+    toast({
+      title: "Draft restored",
+      description: "Your unsaved attendance was restored from this device.",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasDraftRestored]);
+
+  const persistDraftNow = () => {
+    const { batchId, date, attendance: att } = draftRef.current;
+    if (!batchId || !date) return;
+    saveAttendanceDraft({
+      role: "teacher",
+      batchId,
+      date,
+      attendance: att as any,
+    });
+  };
+
+  // Keep latest draft snapshot in a ref so we can flush during navigation/unmount.
+  useEffect(() => {
+    draftRef.current = { batchId: selectedBatch, date: selectedDate, attendance };
+  }, [attendance, selectedBatch, selectedDate]);
+
+  useEffect(() => {
+    if (!selectedBatch || !selectedDate) return;
+    if (Object.keys(attendance).length === 0) return;
+    if (attendanceLoadedKey !== `${selectedBatch}:${selectedDate}`) return;
+    const t = setTimeout(() => {
+      saveAttendanceDraft({
+        role: "teacher",
+        batchId: selectedBatch,
+        date: selectedDate,
+        attendance: attendance as any,
+      });
+    }, 250);
+    return () => {
+      clearTimeout(t);
+      // Flush immediately on dependency change (route change, batch/date switch, unmount).
+      persistDraftNow();
+    };
+  }, [attendance, selectedBatch, selectedDate]);
+
+  // Flush on tab close / refresh and when the tab goes to background.
+  useEffect(() => {
+    const onBeforeUnload = () => persistDraftNow();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") persistDraftNow();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const loadPct = async () => {
@@ -250,6 +332,7 @@ const TeacherAttendance = () => {
         date: selectedDate,
         entries,
       });
+      clearAttendanceDraft({ role: "teacher", batchId: selectedBatch, date: selectedDate });
       toast({
         title: "Success",
         description: `Attendance saved for ${entries.length} student(s).`,

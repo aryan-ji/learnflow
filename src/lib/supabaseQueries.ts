@@ -340,7 +340,7 @@ export const getStudents = async (): Promise<Student[]> => {
 };
 
 export const createStudent = async (student: Student): Promise<Student | null> => {
-  const payload: any = {
+  const basePayload: any = {
     id: student.id,
     institute_id: instituteId(),
     name: student.name,
@@ -353,6 +353,7 @@ export const createStudent = async (student: Student): Promise<Student | null> =
   };
 
   // Optional columns (kept conditional so older DB schemas won't 400 on unknown columns)
+  const payload: any = { ...basePayload };
   if (student.motherName) payload.mother_name = student.motherName;
   if (student.fatherName) payload.father_name = student.fatherName;
   if (student.parentPhone) payload.parent_phone = student.parentPhone;
@@ -360,17 +361,30 @@ export const createStudent = async (student: Student): Promise<Student | null> =
   if (student.address) payload.address = student.address;
   if (student.school) payload.school = student.school;
 
-  const { data, error } = await supabase.from('students').insert([payload]).select().single();
-  if (error) {
-    console.error('Error creating student:', {
-      code: (error as any)?.code,
-      message: (error as any)?.message,
-      details: (error as any)?.details,
-      hint: (error as any)?.hint,
-    });
-    return null;
+  const attempt = async (p: any) =>
+    supabase.from("students").insert([p]).select().single();
+
+  const { data, error } = await attempt(payload);
+  if (!error) return data ? mapStudent(data as DbStudent) : null;
+
+  const code = (error as any)?.code;
+  if (code === "PGRST204") {
+    console.error("Student columns missing in schema cache; retrying insert without optional fields.", error);
+    const retry = await attempt(basePayload);
+    if (retry.error) {
+      console.error("Error creating student (retry):", retry.error);
+      return null;
+    }
+    return retry.data ? mapStudent(retry.data as DbStudent) : null;
   }
-  return data ? mapStudent(data as DbStudent) : null;
+
+  console.error("Error creating student:", {
+    code,
+    message: (error as any)?.message,
+    details: (error as any)?.details,
+    hint: (error as any)?.hint,
+  });
+  return null;
 };
 
 export const updateStudent = async (params: {
@@ -393,7 +407,7 @@ export const updateStudent = async (params: {
   const cleanPhone = (params.phone ?? "").trim();
   const fallbackEmail = `${params.id}@student.local`;
 
-  const payload: any = {
+  const basePayload: any = {
     name: params.name,
     email: cleanEmail || fallbackEmail,
     phone: cleanPhone,
@@ -404,6 +418,7 @@ export const updateStudent = async (params: {
   };
 
   // Optional columns (kept conditional so older DB schemas won't 400 on unknown columns)
+  const payload: any = { ...basePayload };
   if (params.motherName) payload.mother_name = params.motherName;
   if (params.fatherName) payload.father_name = params.fatherName;
   if (params.parentPhone) payload.parent_phone = params.parentPhone;
@@ -411,25 +426,36 @@ export const updateStudent = async (params: {
   if (params.address) payload.address = params.address;
   if (params.school) payload.school = params.school;
 
-  const { data, error } = await supabase
-    .from("students")
-    .update(payload)
-    .eq("institute_id", instituteId())
-    .eq("id", params.id)
-    .select()
-    .single();
+  const attempt = async (p: any) =>
+    supabase
+      .from("students")
+      .update(p)
+      .eq("institute_id", instituteId())
+      .eq("id", params.id)
+      .select()
+      .single();
 
-  if (error) {
-    console.error("Error updating student:", {
-      code: (error as any)?.code,
-      message: (error as any)?.message,
-      details: (error as any)?.details,
-      hint: (error as any)?.hint,
-    });
-    return null;
+  const { data, error } = await attempt(payload);
+  if (!error) return data ? mapStudent(data as DbStudent) : null;
+
+  const code = (error as any)?.code;
+  if (code === "PGRST204") {
+    console.error("Student columns missing in schema cache; retrying update without optional fields.", error);
+    const retry = await attempt(basePayload);
+    if (retry.error) {
+      console.error("Error updating student (retry):", retry.error);
+      return null;
+    }
+    return retry.data ? mapStudent(retry.data as DbStudent) : null;
   }
 
-  return data ? mapStudent(data as DbStudent) : null;
+  console.error("Error updating student:", {
+    code,
+    message: (error as any)?.message,
+    details: (error as any)?.details,
+    hint: (error as any)?.hint,
+  });
+  return null;
 };
 
 export const getStudentById = async (id: string): Promise<Student | null> => {
@@ -509,6 +535,48 @@ export const createBatch = async (batch: Batch): Promise<Batch | null> => {
   return data ? mapBatch(data as DbBatch) : null;
 };
 
+export const updateBatch = async (params: {
+  id: string;
+  name: string;
+  subject: string;
+  schedule: string;
+  teacherId: string;
+}): Promise<Batch | null> => {
+  const payload = {
+    name: params.name,
+    subject: params.subject,
+    schedule: params.schedule,
+    teacher_id: params.teacherId,
+  };
+
+  const { data, error } = await supabase
+    .from("batches")
+    .update(payload)
+    .eq("institute_id", instituteId())
+    .eq("id", params.id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Error updating batch:", error);
+    return null;
+  }
+  return data ? mapBatch(data as DbBatch) : null;
+};
+
+export const deleteBatch = async (batchId: string): Promise<boolean> => {
+  const { error } = await supabase
+    .from("batches")
+    .delete()
+    .eq("institute_id", instituteId())
+    .eq("id", batchId);
+  if (error) {
+    console.error("Error deleting batch:", error);
+    return false;
+  }
+  return true;
+};
+
 // Teachers
 export const getTeachers = async (): Promise<Teacher[]> => {
   const { data, error } = await supabase.from('teachers').select('*').eq("institute_id", instituteId());
@@ -544,6 +612,49 @@ export const createTeacher = async (teacher: Teacher): Promise<Teacher | null> =
     return null;
   }
   return data ? mapTeacher(data as DbTeacher) : null;
+};
+
+export const updateTeacher = async (params: {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  subjects: string[];
+}): Promise<Teacher | null> => {
+  const payload = {
+    name: params.name,
+    email: params.email,
+    phone: params.phone,
+    subjects: params.subjects,
+  };
+
+  const { data, error } = await supabase
+    .from("teachers")
+    .update(payload)
+    .eq("institute_id", instituteId())
+    .eq("id", params.id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Error updating teacher:", error);
+    return null;
+  }
+  return data ? mapTeacher(data as DbTeacher) : null;
+};
+
+export const deleteTeacher = async (teacherId: string): Promise<boolean> => {
+  const { error } = await supabase
+    .from("teachers")
+    .delete()
+    .eq("institute_id", instituteId())
+    .eq("id", teacherId);
+
+  if (error) {
+    console.error("Error deleting teacher:", error);
+    return false;
+  }
+  return true;
 };
 
 // Attendance

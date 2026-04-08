@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Calendar, Check, Clock, CreditCard, Save, Users, X, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { clearAttendanceDraft, loadAttendanceDraft, saveAttendanceDraft } from "@/lib/attendanceDraft";
 import {
   getAttendanceByBatch,
   getAttendanceByBatchDate,
@@ -41,6 +42,18 @@ const AdminAttendance = () => {
   const [attendance, setAttendance] = useState<
     Record<string, AttendanceStatus>
   >({});
+  const [hasDraftRestored, setHasDraftRestored] = useState(false);
+  const [attendanceLoadedKey, setAttendanceLoadedKey] = useState<string | null>(null);
+
+  const draftRef = useRef<{
+    batchId: string;
+    date: string;
+    attendance: Record<string, AttendanceStatus>;
+  }>({
+    batchId: "",
+    date: "",
+    attendance: {},
+  });
   const [attendancePctByStudentId, setAttendancePctByStudentId] = useState<
     Record<string, number | null>
   >({});
@@ -104,13 +117,79 @@ const AdminAttendance = () => {
   useEffect(() => {
     if (!selectedBatch || !selectedDate) return;
     const load = async () => {
+      setAttendanceLoadedKey(null);
       const rows = await getAttendanceByBatchDate(selectedBatch, selectedDate);
       const map: Record<string, AttendanceStatus> = {};
       for (const row of rows) map[row.studentId] = row.status;
-      setAttendance(map);
+
+      const draft = loadAttendanceDraft({ role: "admin", batchId: selectedBatch, date: selectedDate });
+      if (draft && Object.keys(draft.attendance).length > 0) {
+        setAttendance({ ...map, ...draft.attendance });
+        setHasDraftRestored(true);
+      } else {
+        setAttendance(map);
+        setHasDraftRestored(false);
+      }
+      setAttendanceLoadedKey(`${selectedBatch}:${selectedDate}`);
     };
     load();
   }, [selectedBatch, selectedDate]);
+
+  useEffect(() => {
+    if (!hasDraftRestored) return;
+    toast({
+      title: "Draft restored",
+      description: "Your unsaved attendance was restored from this device.",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasDraftRestored]);
+
+  const persistDraftNow = () => {
+    const { batchId, date, attendance: att } = draftRef.current;
+    if (!batchId || !date) return;
+    saveAttendanceDraft({
+      role: "admin",
+      batchId,
+      date,
+      attendance: att as any,
+    });
+  };
+
+  useEffect(() => {
+    draftRef.current = { batchId: selectedBatch, date: selectedDate, attendance };
+  }, [attendance, selectedBatch, selectedDate]);
+
+  useEffect(() => {
+    if (!selectedBatch || !selectedDate) return;
+    if (Object.keys(attendance).length === 0) return;
+    if (attendanceLoadedKey !== `${selectedBatch}:${selectedDate}`) return;
+    const t = setTimeout(() => {
+      saveAttendanceDraft({
+        role: "admin",
+        batchId: selectedBatch,
+        date: selectedDate,
+        attendance: attendance as any,
+      });
+    }, 250);
+    return () => {
+      clearTimeout(t);
+      persistDraftNow();
+    };
+  }, [attendance, selectedBatch, selectedDate]);
+
+  useEffect(() => {
+    const onBeforeUnload = () => persistDraftNow();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") persistDraftNow();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const loadPct = async () => {
@@ -219,6 +298,7 @@ const AdminAttendance = () => {
         date: selectedDate,
         entries,
       });
+      clearAttendanceDraft({ role: "admin", batchId: selectedBatch, date: selectedDate });
 
       toast({
         title: "Success",
