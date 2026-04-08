@@ -1,130 +1,190 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { User } from '@/types';
+import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import type { User } from "@/types";
 import { supabase } from "@/lib/supabase";
-import { clearAuthSession, getAuthSession, setAuthSession } from "@/lib/authSession";
-import { clearActiveInstituteId, getActiveInstituteId, setActiveInstituteId } from "@/lib/tenant";
+import { clearActiveInstituteId, setActiveInstituteId } from "@/lib/tenant";
+import { toast } from "sonner";
 
-type InstituteChoice = { id: string; name: string; role: User["role"] };
-type LoginNeedsInstitute = { needsInstitute: true; institutes: InstituteChoice[] };
+const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+  let timeoutHandle: number | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = window.setTimeout(() => reject(new Error(label)), ms);
+  });
 
-interface AuthContextType {
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle !== undefined) window.clearTimeout(timeoutHandle);
+  }
+};
+
+type AuthContextType = {
   user: User | null;
   instituteId: string | null;
-  login: (email: string, password: string, instituteId?: string) => Promise<User | LoginNeedsInstitute | null>;
-  logout: () => void;
   isAuthenticated: boolean;
-}
+  isAuthLoading: boolean;
+  loginWithPassword: (email: string, password: string) => Promise<{ ok: boolean; message?: string }>;
+  sendPasswordResetEmail: (email: string) => Promise<{ ok: boolean; message?: string }>;
+  logout: () => Promise<void>;
+};
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const fetchAppUserByAuthUserId = async (
+  authUserId: string,
+): Promise<{ user: User; instituteId: string } | null> => {
+  const { data, error } = await supabase
+    .from("users")
+    .select("id,name,email,role,avatar,institute_id")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load app user:", error);
+    return null;
+  }
+  if (!data) return null;
+
+  return {
+    instituteId: String((data as any).institute_id),
+    user: {
+      id: data.id,
+      name: data.name,
+      email: data.email,
+      role: data.role,
+      avatar: data.avatar ?? undefined,
+    },
+  };
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const session = getAuthSession();
-  const [user, setUser] = useState<User | null>(session?.user ?? null);
-  const [instituteId, setInstituteId] = useState<string | null>(
-    session?.instituteId ?? getActiveInstituteId() ?? (import.meta.env.VITE_INSTITUTE_ID ?? null),
-  );
+  const [user, setUser] = useState<User | null>(null);
+  const [instituteId, setInstituteId] = useState<string | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
 
-  const login = async (email: string, _password: string, nextInstituteId?: string): Promise<User | LoginNeedsInstitute | null> => {
-    const cleanEmail = email.trim();
-    const cleanInstituteId = nextInstituteId?.trim() ?? "";
-    if (!cleanEmail) return null;
+  useEffect(() => {
+    let cancelled = false;
 
-    if (cleanInstituteId) {
-      const { data, error } = await supabase
-        .from("users")
-        .select("id,name,email,role,avatar")
-        .eq("institute_id", cleanInstituteId)
-        .ilike("email", cleanEmail)
-        .maybeSingle();
+    const syncFromSession = async () => {
+      setIsAuthLoading(true);
+      try {
+        const { data } = await withTimeout(
+          supabase.auth.getSession(),
+          8000,
+          "Supabase session check timed out (check internet/Supabase URL).",
+        );
+        const session = data.session;
 
-      if (error) {
-        console.error("Login failed:", error);
-        return null;
+        if (!session?.user?.id) {
+          if (!cancelled) {
+            setUser(null);
+            setInstituteId(null);
+          }
+          return;
+        }
+
+        const profile = await withTimeout(
+          fetchAppUserByAuthUserId(session.user.id),
+          8000,
+          "Supabase profile load timed out (check RLS/user linking).",
+        );
+        if (!cancelled) {
+          if (profile) {
+            setActiveInstituteId(profile.instituteId);
+            setInstituteId(profile.instituteId);
+            setUser(profile.user);
+          } else {
+            // Auth user exists, but no linked app user row.
+            toast.error("Account Not Linked", {
+              description: "You logged in, but there is no matching public.users profile. Please update the user's auth_user_id in Supabase or run the seeder.",
+              duration: 10000,
+            });
+            await supabase.auth.signOut();
+            setInstituteId(null);
+            setUser(null);
+          }
+        }
+      } catch (err) {
+        console.error("Auth bootstrap failed:", err);
+        if (!cancelled) {
+          toast.error("Connection Error", {
+            description: "Unable to reach Supabase. If you just updated your .env, please restart 'npm run dev'. Also disable any adblockers.",
+            duration: 8000,
+          });
+          setUser(null);
+          setInstituteId(null);
+        }
+      } finally {
+        if (!cancelled) setIsAuthLoading(false);
       }
-      if (!data) return null;
+    };
 
-      const foundUser: User = {
-        id: data.id,
-        name: data.name,
-        email: data.email,
-        role: data.role,
-        avatar: data.avatar ?? undefined,
-      };
+    syncFromSession();
 
-      setActiveInstituteId(cleanInstituteId);
-      setAuthSession({ instituteId: cleanInstituteId, user: foundUser, ttlDays: 30 });
-      setInstituteId(cleanInstituteId);
-      setUser(foundUser);
-      return foundUser;
-    }
-
-    // No institute provided: resolve by email (if unique), otherwise ask user to choose.
-    const { data: matches, error: matchesError } = await supabase
-      .from("users")
-      .select("id,name,email,role,avatar,institute_id")
-      .ilike("email", cleanEmail);
-
-    if (matchesError) {
-      console.error("Login resolve failed:", matchesError);
-      return null;
-    }
-
-    const rows = (matches ?? []).filter((x: any) => x?.institute_id);
-    if (rows.length === 0) return null;
-
-    if (rows.length === 1) {
-      const r: any = rows[0];
-      const foundUser: User = {
-        id: r.id,
-        name: r.name,
-        email: r.email,
-        role: r.role,
-        avatar: r.avatar ?? undefined,
-      };
-      const iid = String(r.institute_id);
-      setActiveInstituteId(iid);
-      setAuthSession({ instituteId: iid, user: foundUser, ttlDays: 30 });
-      setInstituteId(iid);
-      setUser(foundUser);
-      return foundUser;
-    }
-
-    const uniqueInstituteIds = Array.from(new Set(rows.map((r: any) => String(r.institute_id))));
-    const { data: instituteRows } = await supabase
-      .from("institutes")
-      .select("id,name")
-      .in("id", uniqueInstituteIds);
-
-    const nameById = new Map<string, string>();
-    (instituteRows ?? []).forEach((r: any) => nameById.set(String(r.id), String(r.name ?? r.id)));
-
-    // We might still have multiple entries per institute (e.g., different roles); show institute+role choices.
-    const institutes: InstituteChoice[] = rows.map((r: any) => {
-      const iid = String(r.institute_id);
-      return { id: iid, name: nameById.get(iid) ?? iid, role: r.role as User["role"] };
+    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
+      await syncFromSession();
     });
 
-    return { needsInstitute: true, institutes };
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  const loginWithPassword = async (email: string, password: string) => {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) return { ok: false, message: "Email and password are required." };
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
+    if (error) {
+      console.error("Failed to sign in:", error);
+      return { ok: false, message: error.message };
+    }
+    return { ok: true };
   };
 
-  const logout = () => {
+  const sendPasswordResetEmail = async (email: string) => {
+    const cleanEmail = email.trim();
+    if (!cleanEmail) return { ok: false, message: "Email is required." };
+
+    const redirectTo = `${window.location.origin}/reset-password`;
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, { redirectTo });
+    if (error) {
+      console.error("Failed to send password reset email:", error);
+      return { ok: false, message: error.message };
+    }
+    return { ok: true };
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    clearActiveInstituteId();
     setUser(null);
     setInstituteId(null);
-    clearActiveInstituteId();
-    clearAuthSession();
   };
 
-  return (
-    <AuthContext.Provider value={{ user, instituteId, login, logout, isAuthenticated: !!user }}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo<AuthContextType>(
+    () => ({
+      user,
+      instituteId,
+      isAuthenticated: Boolean(user),
+      isAuthLoading,
+      loginWithPassword,
+      sendPasswordResetEmail,
+      logout,
+    }),
+    [user, instituteId, isAuthLoading],
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 };

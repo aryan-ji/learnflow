@@ -121,8 +121,8 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const [searchItems, setSearchItems] = useState<SearchItem[]>([]);
   const searchWrapRef = useRef<HTMLDivElement | null>(null);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate("/");
     setSidebarOpen(false);
   };

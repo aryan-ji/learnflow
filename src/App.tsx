@@ -4,10 +4,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // Pages
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
 // Admin Pages
@@ -32,10 +34,24 @@ import ParentFees from "./pages/parent/ParentFees";
 
 const queryClient = new QueryClient();
 
+const FullPageLoader = ({ label = "Loading…" }: { label?: string }) => (
+  <div className="min-h-screen bg-white text-slate-900 [font-family:Poppins,system-ui,sans-serif]">
+    <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-6 text-center">
+      <div className="grid h-14 w-14 place-items-center overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+        <img src="/instipilot-mark.png" alt="InstiPilot" className="h-12 w-12 object-contain" />
+      </div>
+      <div className="mt-4 text-lg font-semibold tracking-tight">{label}</div>
+      <div className="mt-2 text-sm text-slate-600">If this takes too long, check your internet and Supabase settings.</div>
+    </div>
+  </div>
+);
+
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode; allowedRoles: string[] }) => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isAuthLoading } = useAuth();
   
+  if (isAuthLoading) return <FullPageLoader label="Signing you in…" />;
+
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
@@ -48,13 +64,16 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode;
 };
 
 const AppRoutes = () => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isAuthLoading } = useAuth();
+
+  if (isAuthLoading) return <FullPageLoader label="Loading app…" />;
 
   return (
     <Routes>
       {/* Public Routes */}
       <Route path="/" element={isAuthenticated ? <Navigate to={`/${user?.role}`} replace /> : <Landing />} />
       <Route path="/login" element={isAuthenticated ? <Navigate to={`/${user?.role}`} replace /> : <Login />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Admin Routes */}
       <Route path="/admin" element={<ProtectedRoute allowedRoles={['admin']}><AdminDashboard /></ProtectedRoute>} />
@@ -87,10 +106,12 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <AppRoutes />
-        </AuthProvider>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <ErrorBoundary>
+          <AuthProvider>
+            <AppRoutes />
+          </AuthProvider>
+        </ErrorBoundary>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
