@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowLeft, KeyRound, Mail, Sparkles } from "lucide-react";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const LOGO_SRC = "/instipilot-mark.png";
+const LOGO_SRC = "/learnflow-mark.png";
 const LOGO_FALLBACK_SRC = "/learnflow-mark.png";
 
 export default function Login() {

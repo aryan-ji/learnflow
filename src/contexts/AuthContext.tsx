@@ -64,15 +64,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     let cancelled = false;
 
-    const syncFromSession = async () => {
+    const syncFromSession = async (providedSession?: any) => {
       setIsAuthLoading(true);
       try {
-        const { data } = await withTimeout(
-          supabase.auth.getSession(),
-          8000,
-          "Supabase session check timed out (check internet/Supabase URL).",
-        );
-        const session = data.session;
+        let session = providedSession;
+        
+        if (session === undefined) {
+          const { data } = await withTimeout(
+            supabase.auth.getSession(),
+            15000,
+            "Supabase session check timed out (check internet/Supabase URL).",
+          );
+          session = data.session;
+        }
 
         if (!session?.user?.id) {
           if (!cancelled) {
@@ -120,8 +124,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     syncFromSession();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
-      await syncFromSession();
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      await syncFromSession(session);
     });
 
     return () => {

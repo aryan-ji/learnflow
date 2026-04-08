@@ -35,13 +35,31 @@ import ParentFees from "./pages/parent/ParentFees";
 const queryClient = new QueryClient();
 
 const FullPageLoader = ({ label = "Loading…" }: { label?: string }) => (
-  <div className="min-h-screen bg-white text-slate-900 [font-family:Poppins,system-ui,sans-serif]">
-    <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-6 text-center">
-      <div className="grid h-14 w-14 place-items-center overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-        <img src="/instipilot-mark.png" alt="InstiPilot" className="h-12 w-12 object-contain" />
+  <div className="fixed inset-0 min-h-screen bg-slate-50/80 backdrop-blur-sm z-50 flex items-center justify-center text-slate-900 [font-family:Poppins,system-ui,sans-serif]">
+    <div className="flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-500 ease-out">
+      
+      {/* Interactive & Animated Logo Container */}
+      <div className="relative group cursor-wait">
+        <div className="absolute -inset-2 bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-600 rounded-2xl blur opacity-30 group-hover:opacity-70 transition duration-1000 group-hover:duration-300 animate-pulse"></div>
+        <div className="relative grid h-24 w-24 place-items-center overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-slate-200 transition-transform duration-500 hover:scale-110 hover:-translate-y-1">
+          <img src="/learnflow-mark.png" alt="LearnFlow" className="h-16 w-16 object-contain" />
+        </div>
       </div>
-      <div className="mt-4 text-lg font-semibold tracking-tight">{label}</div>
-      <div className="mt-2 text-sm text-slate-600">If this takes too long, check your internet and Supabase settings.</div>
+
+      {/* Animated Bouncing Dots */}
+      <div className="mt-8 flex items-center gap-1.5">
+        <div className="h-2 w-2 rounded-full bg-blue-600 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+        <div className="h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+        <div className="h-2 w-2 rounded-full bg-purple-600 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+      </div>
+      
+      <div className="mt-4 text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600">
+        {label}
+      </div>
+      
+      <div className="mt-2 text-sm text-slate-500 font-medium animate-pulse">
+        Getting things ready for you...
+      </div>
     </div>
   </div>
 );
