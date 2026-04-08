@@ -19,41 +19,9 @@ if (missingEnv.length) {
   throw new Error(`Missing Supabase env vars: ${missingEnv.join(", ")}`);
 }
 
-const mergeSignals = (a?: AbortSignal, b?: AbortSignal) => {
-  if (!a) return b;
-  if (!b) return a;
-  // AbortSignal.any is supported in modern browsers; fallback to b.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const anySignal = (AbortSignal as any).any as undefined | ((signals: AbortSignal[]) => AbortSignal);
-  return anySignal ? anySignal([a, b]) : b;
-};
-
-const fetchWithTimeout: typeof fetch = async (input, init) => {
-  const controller = new AbortController();
-  const timeoutMs = 12_000;
-  const timeoutHandle = window.setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    if (import.meta.env.DEV) {
-      // Useful when debugging "stuck on loading" issues.
-      // eslint-disable-next-line no-console
-      console.debug("[supabase fetch]", input);
-    }
-    return await fetch(input, {
-      ...init,
-      signal: mergeSignals(init?.signal, controller.signal),
-    });
-  } finally {
-    window.clearTimeout(timeoutHandle);
-  }
-};
-
 // Note: With RLS enabled, the app must use Supabase Auth.
 // These options help keep sessions persistent and handle auth redirects (e.g. password reset).
 export const supabase = createClient(supabaseUrl, supabaseKey, {
-  global: {
-    fetch: fetchWithTimeout,
-  },
   auth: {
     persistSession: true,
     autoRefreshToken: true,

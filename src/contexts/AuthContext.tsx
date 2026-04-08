@@ -44,8 +44,13 @@ const fetchAppUserByAuthUserId = async (
   }
   if (!data) return null;
 
+  if (!data.institute_id) {
+    console.error("Missing institute_id for user:", data.id);
+    return null;
+  }
+
   return {
-    instituteId: String((data as any).institute_id),
+    instituteId: String(data.institute_id),
     user: {
       id: data.id,
       name: data.name,
@@ -65,16 +70,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let cancelled = false;
 
     const syncFromSession = async (providedSession?: any) => {
-      setIsAuthLoading(true);
+      if (providedSession === undefined) {
+        setIsAuthLoading(true);
+      }
+      
       try {
         let session = providedSession;
         
         if (session === undefined) {
-          const { data } = await withTimeout(
-            supabase.auth.getSession(),
-            15000,
-            "Supabase session check timed out (check internet/Supabase URL).",
-          );
+          const { data } = await supabase.auth.getSession();
           session = data.session;
         }
 
@@ -86,11 +90,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           return;
         }
 
-        const profile = await withTimeout(
-          fetchAppUserByAuthUserId(session.user.id),
-          8000,
-          "Supabase profile load timed out (check RLS/user linking).",
-        );
+        const profile = await fetchAppUserByAuthUserId(session.user.id);
         if (!cancelled) {
           if (profile) {
             setActiveInstituteId(profile.instituteId);
@@ -108,11 +108,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           }
         }
       } catch (err) {
-        console.error("Auth bootstrap failed:", err);
+        const rawError = (err as any)?.message || String(err);
+        console.error("Auth bootstrap failed:", rawError);
         if (!cancelled) {
-          toast.error("Connection Error", {
-            description: "Unable to reach Supabase. If you just updated your .env, please restart 'npm run dev'. Also disable any adblockers.",
-            duration: 8000,
+          toast.error("Connection Failed", {
+            description: `Exact Error: ${rawError}`,
+            duration: 10000,
           });
           setUser(null);
           setInstituteId(null);
@@ -124,8 +125,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     syncFromSession();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      await syncFromSession(session);
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      syncFromSession(session);
     });
 
     return () => {
