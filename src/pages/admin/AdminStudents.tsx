@@ -115,7 +115,13 @@ const AdminStudents = () => {
 
   const deriveParentPassword = (studentName: string) => {
     const first = studentName.trim().split(/\s+/).filter(Boolean)[0] ?? "";
-    return first ? first.toLowerCase() : "";
+    const base = first ? first.toLowerCase() : "parent";
+
+    // Supabase Auth enforces a minimum password length (commonly 6+).
+    // Keep it "child first name in lowercase" by repeating the same token if it's short.
+    let out = base;
+    while (out.length < 6) out += base;
+    return out;
   };
 
   const resolveParentEmail = (parentEmailRaw: string) => {

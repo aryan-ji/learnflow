@@ -1,7 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { getActiveInstituteId } from "@/lib/tenant";
 import { User, Student, Batch, Teacher, Attendance, Test, TestResult, Fee } from '@/types';
-import { createClient } from "@supabase/supabase-js";
 
 const instituteId = () => getActiveInstituteId() ?? (import.meta.env.VITE_INSTITUTE_ID ?? "inst_1");
 
@@ -251,9 +250,8 @@ export const getOrCreateParentUserByEmail = async (params: {
   parentName: string;
   /**
    * Optional: if provided, we will try to provision a Supabase Auth user for this email
-   * (in a separate, non-persistent client) and link the resulting auth user id to public.users.auth_user_id.
-   *
-   * Note: This only works if Supabase Auth signups are enabled for the project.
+   * (via a server-side Netlify function using the service role key) and link the resulting
+   * auth user id to public.users.auth_user_id.
    */
   password?: string;
 }): Promise<User | null> => {
@@ -278,51 +276,43 @@ export const getOrCreateParentUserByEmail = async (params: {
     const password = (params.password ?? "").trim();
     if (!password) return null;
 
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseKey) return null;
-
-    const authClient = createClient(supabaseUrl, supabaseKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-    });
-
-    const signUpRes = await authClient.auth.signUp({
-      email: parentEmail,
-      password,
-    });
-
-    if (!signUpRes.error) {
-      return signUpRes.data.user?.id ?? null;
-    }
-
-    // If user already exists, try to sign in with the provided password so we can link auth_user_id.
-    const rawMessage = signUpRes.error.message || "";
-    const mightExist =
-      /already registered/i.test(rawMessage) ||
-      /user already exists/i.test(rawMessage) ||
-      /email.*already/i.test(rawMessage);
-
-    if (!mightExist) {
-      console.error("Failed to sign up parent auth user:", signUpRes.error);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    if (!accessToken) {
+      console.error("Missing admin session; cannot provision parent auth user.");
       return null;
     }
 
-    const signInRes = await authClient.auth.signInWithPassword({
-      email: parentEmail,
-      password,
-    });
-    if (signInRes.error) {
-      // Can't link without admin access; proceed with public.users only.
+    try {
+      const res = await fetch("/.netlify/functions/provision-parent-auth", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          instituteId: instituteId(),
+          parentEmail,
+          password,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.error("Parent auth provisioning failed:", res.status, text);
+        return null;
+      }
+
+      const json = (await res.json().catch(() => ({}))) as any;
+      return (
+        (typeof json?.auth_user_id === "string" && json.auth_user_id) ||
+        (typeof json?.authUserId === "string" && json.authUserId) ||
+        null
+      );
+    } catch (err) {
+      console.error("Parent auth provisioning request failed:", err);
       return null;
     }
-
-    const authUserId = signInRes.data.user?.id ?? null;
-    await authClient.auth.signOut();
-    return authUserId;
   };
 
   if (existing) {
@@ -473,7 +463,44 @@ export const createStudent = async (student: Student): Promise<Student | null> =
     console.error("Student columns missing in schema cache; retrying insert without optional fields.", error);
     const retry = await attempt(basePayload);
     if (retry.error) {
-      console.error("Error creating student (retry):", retry.error);
+      const retryCode = (retry.error as any)?.code;
+      console.error("Error creating student (retry):", {
+        code: retryCode,
+        message: (retry.error as any)?.message,
+        details: (retry.error as any)?.details,
+        hint: (retry.error as any)?.hint,
+      });
+
+      const msg = String((retry.error as any)?.message ?? "");
+      const details = String((retry.error as any)?.details ?? "");
+      const rollMissing = /roll_number/i.test(msg) || /roll_number/i.test(details);
+
+      // Fallback for databases that added roll_number but haven't applied the trigger yet.
+      if (rollMissing) {
+        const { data: last, error: lastErr } = await supabase
+          .from("students")
+          .select("roll_number")
+          .eq("institute_id", instituteId())
+          .eq("batch_id", student.batchId)
+          .order("roll_number", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (lastErr) {
+          console.error("Error fetching last roll number:", lastErr);
+          return null;
+        }
+
+        const nextRoll = Number((last as any)?.roll_number ?? 0) + 1;
+        const withRoll = { ...basePayload, roll_number: nextRoll };
+        const third = await attempt(withRoll);
+        if (third.error) {
+          console.error("Error creating student (roll fallback):", third.error);
+          return null;
+        }
+        return third.data ? mapStudent(third.data as DbStudent) : null;
+      }
+
       return null;
     }
     return retry.data ? mapStudent(retry.data as DbStudent) : null;
