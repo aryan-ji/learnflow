@@ -10,6 +10,7 @@ export interface User {
 
 export interface Student {
   id: string;
+  rollNumber?: number;
   name: string;
   email: string;
   phone: string;

@@ -70,13 +70,6 @@ const AdminBatches = () => {
     setFormTeacherId(teachers[0]?.id ?? "");
   };
 
-  const generateBatchId = () => {
-    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-      return `b-${crypto.randomUUID()}`;
-    }
-    return `b-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  };
-
   const handleSaveBatch = async () => {
     if (!formName.trim() || !formSubject.trim() || !formSchedule.trim() || !formTeacherId) {
       toast({
@@ -90,7 +83,7 @@ const AdminBatches = () => {
     setLoading(true);
     try {
       const payload: Batch = {
-        id: generateBatchId(),
+        id: "",
         name: formName.trim(),
         subject: formSubject.trim(),
         teacherId: formTeacherId,
@@ -301,4 +294,3 @@ const AdminBatches = () => {
 };
 
 export default AdminBatches;
-

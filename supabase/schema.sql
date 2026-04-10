@@ -1,9 +1,13 @@
--- EduFlow (prototype) schema
+﻿-- EduFlow (prototype) schema
 -- This schema matches the app's current ID shapes (e.g. "s1", "b1") and does not require Supabase Auth.
 -- Recommended next step: enable RLS + Supabase Auth once the frontend login is migrated.
 
 -- Extensions (safe no-op if already enabled)
 create extension if not exists pgcrypto;
+
+-- Sequences for human-friendly IDs
+create sequence if not exists public.batch_id_seq;
+create sequence if not exists public.student_id_seq;
 
 -- INSTITUTES (multi-tenant discriminator)
 create table if not exists public.institutes (
@@ -40,7 +44,7 @@ create index if not exists teachers_institute_id_idx on public.teachers(institut
 
 -- BATCHES
 create table if not exists public.batches (
-  id text primary key,
+  id text primary key default ('b' || nextval('public.batch_id_seq')),
   institute_id text not null references public.institutes(id) on update cascade on delete restrict,
   name text not null,
   subject text not null,
@@ -54,8 +58,10 @@ create index if not exists batches_teacher_id_idx on public.batches(teacher_id);
 
 -- STUDENTS
 create table if not exists public.students (
-  id text primary key,
+  id text primary key default ('s' || nextval('public.student_id_seq')),
   institute_id text not null references public.institutes(id) on update cascade on delete restrict,
+  batch_id text not null references public.batches(id) on update cascade on delete restrict,
+  roll_number integer not null,
   name text not null,
   email text not null,
   phone text not null,
@@ -65,7 +71,6 @@ create table if not exists public.students (
   parent_email text,
   address text,
   school text,
-  batch_id text not null references public.batches(id) on update cascade on delete restrict,
   parent_id text not null references public.users(id) on update cascade on delete restrict,
   enrollment_date date not null,
   status text not null check (status in ('active', 'inactive'))
@@ -74,6 +79,57 @@ create table if not exists public.students (
 create index if not exists students_institute_id_idx on public.students(institute_id);
 create index if not exists students_batch_id_idx on public.students(batch_id);
 create index if not exists students_parent_id_idx on public.students(parent_id);
+create unique index if not exists students_roll_unique
+  on public.students(institute_id, batch_id, roll_number);
+
+-- Roll-number counters (per batch, per institute)
+create table if not exists public.batch_roll_counters (
+  institute_id text not null references public.institutes(id) on update cascade on delete restrict,
+  batch_id text not null references public.batches(id) on update cascade on delete cascade,
+  last_roll integer not null default 0,
+  primary key (institute_id, batch_id)
+);
+
+create or replace function public.assign_student_roll_number()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  next_roll integer;
+begin
+  if new.roll_number is not null then
+    return new;
+  end if;
+
+  insert into public.batch_roll_counters(institute_id, batch_id, last_roll)
+  values (new.institute_id, new.batch_id, 0)
+  on conflict (institute_id, batch_id) do nothing;
+
+  update public.batch_roll_counters
+  set last_roll = last_roll + 1
+  where institute_id = new.institute_id and batch_id = new.batch_id
+  returning last_roll into next_roll;
+
+  new.roll_number := next_roll;
+  return new;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_trigger
+    where tgname = 'students_assign_roll_number'
+  ) then
+    create trigger students_assign_roll_number
+    before insert on public.students
+    for each row
+    execute function public.assign_student_roll_number();
+  end if;
+end $$;
 
 -- ATTENDANCE
 create table if not exists public.attendance (
@@ -149,6 +205,7 @@ alter table public.users disable row level security;
 alter table public.teachers disable row level security;
 alter table public.batches disable row level security;
 alter table public.students disable row level security;
+alter table public.batch_roll_counters disable row level security;
 alter table public.attendance disable row level security;
 alter table public.tests disable row level security;
 alter table public.test_results disable row level security;
@@ -157,12 +214,11 @@ alter table public.fees disable row level security;
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on all tables in schema public to anon, authenticated;
 alter default privileges in schema public grant select, insert, update, delete on tables to anon, authenticated;
+
 -- Prevent duplicate monthly fees for the same student within an institute
 -- Note: this will fail if duplicates already exist; remove duplicates first if needed.
 create unique index if not exists fees_unique_student_month_idx
   on public.fees(institute_id, student_id, month);
 
-
 -- Institute-wide setting: hide all fee amounts (only show paid/not paid)
 alter table public.institutes add column if not exists hide_fee_amounts boolean not null default false;
-

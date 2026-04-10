@@ -113,11 +113,25 @@ const AdminStudents = () => {
     setFormBatchId("");
   };
 
-  const generateStudentId = () => {
-    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-      return `s-${crypto.randomUUID()}`;
-    }
-    return `s-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const deriveParentPassword = (studentName: string) => {
+    const first = studentName.trim().split(/\s+/).filter(Boolean)[0] ?? "";
+    return first ? first.toLowerCase() : "";
+  };
+
+  const resolveParentEmail = (parentEmailRaw: string, studentEmailRaw: string) => {
+    const parentEmail = parentEmailRaw.trim();
+    const studentEmail = studentEmailRaw.trim();
+
+    const candidate = (parentEmail || studentEmail).trim().toLowerCase();
+    if (!candidate) return "";
+
+    // Don't create parent accounts for placeholder / generated student emails.
+    if (candidate.endsWith("@student.local")) return "";
+
+    // Simple sanity check; DB will still enforce constraints.
+    if (!candidate.includes("@")) return "";
+
+    return candidate;
   };
 
   const handleSaveStudent = async () => {
@@ -136,10 +150,12 @@ const AdminStudents = () => {
     setLoading(true);
     try {
       const parentName = formFatherName.trim() || formMotherName.trim() || `Parent of ${formName.trim()}`;
-      const parent = formParentEmail.trim()
+      const parentEmailForAccount = resolveParentEmail(formParentEmail, formEmail);
+      const parent = parentEmailForAccount
         ? await getOrCreateParentUserByEmail({
-            parentEmail: formParentEmail.trim(),
+            parentEmail: parentEmailForAccount,
             parentName,
+            password: deriveParentPassword(formName),
           })
         : await getOrCreateUnassignedParentUser();
 
@@ -152,17 +168,17 @@ const AdminStudents = () => {
         return;
       }
 
-      const studentId = generateStudentId();
+      const storedParentEmail = parentEmailForAccount || formParentEmail.trim();
 
       const newStudent: Student = {
-        id: studentId,
+        id: "",
         name: formName.trim(),
-        email: formEmail.trim() || `${studentId}@student.local`,
+        email: formEmail.trim() || `student-${Date.now()}@student.local`,
         phone: formPhone.trim() || "",
         motherName: formMotherName.trim() || undefined,
         fatherName: formFatherName.trim() || undefined,
         parentPhone: formParentPhone.trim() || undefined,
-        parentEmail: formParentEmail.trim() || undefined,
+        parentEmail: storedParentEmail.trim() || undefined,
         address: formAddress.trim() || undefined,
         school: formSchool.trim() || undefined,
         batchId: formBatchId,
@@ -241,7 +257,11 @@ const AdminStudents = () => {
       const prevParentEmail = (s.parentEmail ?? "").trim().toLowerCase();
 
       if (nextParentEmail && nextParentEmail !== prevParentEmail) {
-        const parent = await getOrCreateParentUserByEmail({ parentEmail: nextParentEmail, parentName });
+        const parent = await getOrCreateParentUserByEmail({
+          parentEmail: nextParentEmail,
+          parentName,
+          password: deriveParentPassword(editName),
+        });
         if (!parent) {
           toast({ title: "Error", description: "Could not find/create the parent user. Check Parent Email.", variant: "destructive" });
           return;
@@ -414,7 +434,7 @@ const AdminStudents = () => {
                               {student.name}
                             </p>
                             <p className="text-xs text-muted-foreground truncate">
-                              ID: {student.id.slice(0, 8)}...
+                              Roll: {student.rollNumber ?? "-"}
                             </p>
                           </div>
                         </div>

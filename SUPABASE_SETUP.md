@@ -17,6 +17,14 @@ Run this once:
 
 This creates `public.institutes`, adds `institute_id` to all tables, and backfills existing rows to `inst_1`.
 
+## 3b) Sequential IDs + roll numbers (recommended)
+Run this once (after step 3):
+- `supabase/migrations/004_sequences_and_roll_numbers.sql`
+
+This will:
+- Auto-generate sequential `b1/b2/...` batch ids and `s1/s2/...` student ids (if you omit `id` on insert).
+- Assign `roll_number` starting from 1 in every batch (and auto-increment on new enrollments).
+
 ## 4) Enable RLS + policies (required for real production)
 Run this once (after step 3):
 - `supabase/migrations/003_enable_rls_and_policies.sql`

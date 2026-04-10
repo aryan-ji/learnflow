@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { getActiveInstituteId } from "@/lib/tenant";
 import { User, Student, Batch, Teacher, Attendance, Test, TestResult, Fee } from '@/types';
+import { createClient } from "@supabase/supabase-js";
 
 const instituteId = () => getActiveInstituteId() ?? (import.meta.env.VITE_INSTITUTE_ID ?? "inst_1");
 
@@ -14,6 +15,7 @@ type DbUser = {
 
 type DbStudent = {
   id: string;
+  roll_number?: number | null;
   name: string;
   email: string;
   phone: string;
@@ -98,6 +100,7 @@ const mapUser = (row: DbUser): User => ({
 
 const mapStudent = (row: DbStudent): Student => ({
   id: row.id,
+  rollNumber: row.roll_number ?? undefined,
   name: row.name,
   email: row.email,
   phone: row.phone,
@@ -246,6 +249,13 @@ export const createUser = async (user: User): Promise<User | null> => {
 export const getOrCreateParentUserByEmail = async (params: {
   parentEmail: string;
   parentName: string;
+  /**
+   * Optional: if provided, we will try to provision a Supabase Auth user for this email
+   * (in a separate, non-persistent client) and link the resulting auth user id to public.users.auth_user_id.
+   *
+   * Note: This only works if Supabase Auth signups are enabled for the project.
+   */
+  password?: string;
 }): Promise<User | null> => {
   const parentEmail = params.parentEmail.trim().toLowerCase();
   const parentName = params.parentName.trim();
@@ -264,14 +274,88 @@ export const getOrCreateParentUserByEmail = async (params: {
     return null;
   }
 
-  if (existing) return mapUser(existing as DbUser);
+  const ensureAuthUserId = async (): Promise<string | null> => {
+    const password = (params.password ?? "").trim();
+    if (!password) return null;
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) return null;
+
+    const authClient = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    });
+
+    const signUpRes = await authClient.auth.signUp({
+      email: parentEmail,
+      password,
+    });
+
+    if (!signUpRes.error) {
+      return signUpRes.data.user?.id ?? null;
+    }
+
+    // If user already exists, try to sign in with the provided password so we can link auth_user_id.
+    const rawMessage = signUpRes.error.message || "";
+    const mightExist =
+      /already registered/i.test(rawMessage) ||
+      /user already exists/i.test(rawMessage) ||
+      /email.*already/i.test(rawMessage);
+
+    if (!mightExist) {
+      console.error("Failed to sign up parent auth user:", signUpRes.error);
+      return null;
+    }
+
+    const signInRes = await authClient.auth.signInWithPassword({
+      email: parentEmail,
+      password,
+    });
+    if (signInRes.error) {
+      // Can't link without admin access; proceed with public.users only.
+      return null;
+    }
+
+    const authUserId = signInRes.data.user?.id ?? null;
+    await authClient.auth.signOut();
+    return authUserId;
+  };
+
+  if (existing) {
+    const existingAuthUserId = (existing as any)?.auth_user_id;
+    const wantsAuthProvisioning = Boolean((params.password ?? "").trim());
+
+    // If the profile exists but isn't linked to Supabase Auth yet, try linking it.
+    if (!existingAuthUserId && wantsAuthProvisioning) {
+      const authUserId = await ensureAuthUserId();
+      if (authUserId) {
+        const { error: linkError } = await supabase
+          .from("users")
+          .update({ auth_user_id: authUserId } as any)
+          .eq("institute_id", instituteId())
+          .eq("id", (existing as any).id);
+
+        if (linkError && (linkError as any)?.code !== "PGRST204") {
+          console.error("Failed to link parent auth_user_id:", linkError);
+        }
+      }
+    }
+
+    return mapUser(existing as DbUser);
+  }
 
   const id =
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? `u-${crypto.randomUUID()}`
       : `u-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-  const payload = {
+  const authUserId = await ensureAuthUserId();
+
+  const basePayload: any = {
     id,
     institute_id: instituteId(),
     name: parentName || "Parent",
@@ -280,12 +364,27 @@ export const getOrCreateParentUserByEmail = async (params: {
     avatar: null,
   };
 
-  const { data, error } = await supabase.from("users").insert([payload]).select().single();
-  if (error) {
-    console.error("Error creating parent user:", error);
-    return null;
+  const payload: any = { ...basePayload };
+  if (authUserId) payload.auth_user_id = authUserId;
+
+  const attempt = async (p: any) => supabase.from("users").insert([p]).select().single();
+
+  const { data, error } = await attempt(payload);
+  if (!error) return data ? mapUser(data as DbUser) : null;
+
+  const code = (error as any)?.code;
+  if (code === "PGRST204") {
+    // auth_user_id column may not exist yet (if migration 003 hasn't been applied)
+    const retry = await attempt(basePayload);
+    if (retry.error) {
+      console.error("Error creating parent user (retry):", retry.error);
+      return null;
+    }
+    return retry.data ? mapUser(retry.data as DbUser) : null;
   }
-  return data ? mapUser(data as DbUser) : null;
+
+  console.error("Error creating parent user:", error);
+  return null;
 };
 
 export const getOrCreateUnassignedParentUser = async (): Promise<User | null> => {
@@ -341,7 +440,6 @@ export const getStudents = async (): Promise<Student[]> => {
 
 export const createStudent = async (student: Student): Promise<Student | null> => {
   const basePayload: any = {
-    id: student.id,
     institute_id: instituteId(),
     name: student.name,
     email: student.email,
@@ -351,6 +449,9 @@ export const createStudent = async (student: Student): Promise<Student | null> =
     enrollment_date: student.enrollmentDate,
     status: student.status,
   };
+
+  // If DB has defaults for ID (recommended), omit ID and let Postgres assign.
+  if (student.id) basePayload.id = student.id;
 
   // Optional columns (kept conditional so older DB schemas won't 400 on unknown columns)
   const payload: any = { ...basePayload };
@@ -518,8 +619,7 @@ export const getBatchById = async (id: string): Promise<Batch | null> => {
 };
 
 export const createBatch = async (batch: Batch): Promise<Batch | null> => {
-  const payload = {
-    id: batch.id,
+  const payload: any = {
     institute_id: instituteId(),
     name: batch.name,
     subject: batch.subject,
@@ -527,6 +627,9 @@ export const createBatch = async (batch: Batch): Promise<Batch | null> => {
     schedule: batch.schedule,
     student_count: batch.studentCount,
   };
+
+  // If DB has defaults for ID (recommended), omit ID and let Postgres assign.
+  if (batch.id) payload.id = batch.id;
   const { data, error } = await supabase.from('batches').insert([payload]).select().single();
   if (error) {
     console.error('Error creating batch:', error);
