@@ -118,15 +118,9 @@ const AdminStudents = () => {
     return first ? first.toLowerCase() : "";
   };
 
-  const resolveParentEmail = (parentEmailRaw: string, studentEmailRaw: string) => {
-    const parentEmail = parentEmailRaw.trim();
-    const studentEmail = studentEmailRaw.trim();
-
-    const candidate = (parentEmail || studentEmail).trim().toLowerCase();
+  const resolveParentEmail = (parentEmailRaw: string) => {
+    const candidate = parentEmailRaw.trim().toLowerCase();
     if (!candidate) return "";
-
-    // Don't create parent accounts for placeholder / generated student emails.
-    if (candidate.endsWith("@student.local")) return "";
 
     // Simple sanity check; DB will still enforce constraints.
     if (!candidate.includes("@")) return "";
@@ -150,7 +144,7 @@ const AdminStudents = () => {
     setLoading(true);
     try {
       const parentName = formFatherName.trim() || formMotherName.trim() || `Parent of ${formName.trim()}`;
-      const parentEmailForAccount = resolveParentEmail(formParentEmail, formEmail);
+      const parentEmailForAccount = resolveParentEmail(formParentEmail);
       const parent = parentEmailForAccount
         ? await getOrCreateParentUserByEmail({
             parentEmail: parentEmailForAccount,
