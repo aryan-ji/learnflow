@@ -19,6 +19,33 @@ import { CreditCard, Calendar, AlertCircle } from "lucide-react";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
+const monthKeyFromIso = (isoDate: string) => String(isoDate).slice(0, 7); // YYYY-MM
+
+const addMonths = (date: Date, months: number) => {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
+  return d;
+};
+
+const monthKeysBetweenInclusive = (startMonthKey: string, endMonthKey: string) => {
+  const start = new Date(`${startMonthKey}-01T00:00:00`);
+  const end = new Date(`${endMonthKey}-01T00:00:00`);
+  const out: string[] = [];
+  let cursor = start;
+  for (let i = 0; i < 240; i++) {
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
+    out.push(key);
+    if (key === endMonthKey) break;
+    cursor = addMonths(cursor, 1);
+  }
+  return out;
+};
+
+const labelForMonthKey = (monthKey: string) => {
+  const d = new Date(`${monthKey}-01T00:00:00`);
+  return d.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+};
+
 const ParentFees = () => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -142,6 +169,33 @@ const ParentFees = () => {
 
         {/* CHILDREN */}
         {childrenWithFees.map(({ child, fees, batch }) => {
+          const joinMonthKey = monthKeyFromIso(child.enrollmentDate);
+          const currentMonthKey = monthKeyFromIso(todayIso());
+          const months = monthKeysBetweenInclusive(joinMonthKey, currentMonthKey);
+
+          const feeByMonthKey = new Map<string, Fee>();
+          fees.forEach((f) => {
+            const key = f?.dueDate ? monthKeyFromIso(f.dueDate) : "";
+            if (!key) return;
+            // If multiple fees exist for same month, prefer the latest due date (usually irrelevant).
+            const prev = feeByMonthKey.get(key);
+            if (!prev || String(f.dueDate) > String(prev.dueDate)) feeByMonthKey.set(key, f);
+          });
+
+          const monthlyRows = months.map((monthKey) => {
+            const fee = feeByMonthKey.get(monthKey) ?? null;
+            const paid = fee ? effectiveStatus(fee) === "paid" : false;
+            return {
+              monthKey,
+              label: labelForMonthKey(monthKey),
+              fee,
+              paid,
+            };
+          });
+
+          const paidMonths = monthlyRows.filter((r) => r.paid).length;
+          const notPaidMonths = monthlyRows.length - paidMonths;
+
           const totalPaid = fees
             .filter((f) => effectiveStatus(f) === "paid")
             .reduce((sum, f) => sum + f.amount, 0);
@@ -177,7 +231,7 @@ const ParentFees = () => {
                   <p className="text-sm text-muted-foreground mb-1">Total Paid</p>
                   <p className="text-2xl font-bold text-green-700">
                     {hideFeeAmounts ? (
-                      "Hidden"
+                      `${paidMonths} month${paidMonths === 1 ? "" : "s"}`
                     ) : (
                       <>
                         {"\u20B9"}
@@ -201,7 +255,7 @@ const ParentFees = () => {
                     }`}
                   >
                     {hideFeeAmounts ? (
-                      "Hidden"
+                      `${notPaidMonths} month${notPaidMonths === 1 ? "" : "s"}`
                     ) : (
                       <>
                         {"\u20B9"}
@@ -226,10 +280,61 @@ const ParentFees = () => {
               <div className="p-6">
                 <h3 className="font-semibold mb-5 flex items-center gap-2">
                   <CreditCard className="h-4 w-4 text-primary" />
-                  Fee History
+                  {hideFeeAmounts ? "Monthly Status (from joining)" : "Fee History"}
                 </h3>
 
-                {fees.length === 0 ? (
+                {hideFeeAmounts ? (
+                  <div className="space-y-3">
+                    {monthlyRows.map((row) => (
+                      <div
+                        key={row.monthKey}
+                        className="flex items-center justify-between bg-muted/40 rounded-2xl p-5 hover:bg-muted/60 transition"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                            <Calendar className="h-5 w-5 text-primary" />
+                          </div>
+
+                          <div>
+                            <p className="font-medium">{row.label}</p>
+                            {row.fee?.dueDate ? (
+                              <p className="text-sm text-muted-foreground">
+                                Due:{" "}
+                                {new Date(row.fee.dueDate).toLocaleDateString("en-IN", {
+                                  day: "numeric",
+                                  month: "short",
+                                })}
+                              </p>
+                            ) : (
+                              <p className="text-sm text-muted-foreground">No fee record</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-right flex items-center gap-4">
+                          <div className="flex flex-col items-end gap-2">
+                            {row.paid ? (
+                              <StatusBadge status="paid" />
+                            ) : (
+                              <StatusBadge status="pending" labelOverride="Not Paid" />
+                            )}
+
+                            {row.fee && !row.paid && (
+                              <Button
+                                size="sm"
+                                className="rounded-xl bg-primary text-primary-foreground"
+                                onClick={() => handlePayNow(row.fee as Fee)}
+                                disabled={loading}
+                              >
+                                Pay Now
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : fees.length === 0 ? (
                   <div className="text-sm text-muted-foreground">
                     No fee records found for this student.
                   </div>
@@ -260,14 +365,8 @@ const ParentFees = () => {
                         <div className="text-right flex items-center gap-4">
                           <div>
                             <p className="font-semibold text-lg">
-                              {hideFeeAmounts ? (
-                                "Hidden"
-                              ) : (
-                                <>
-                                  {"\u20B9"}
-                                  {fee.amount.toLocaleString()}
-                                </>
-                              )}
+                              {"\u20B9"}
+                              {fee.amount.toLocaleString()}
                             </p>
 
                             {fee.paidDate && (
@@ -279,15 +378,7 @@ const ParentFees = () => {
                           </div>
 
                           <div className="flex flex-col items-end gap-2">
-                            {hideFeeAmounts ? (
-                              effectiveStatus(fee) === "paid" ? (
-                                <StatusBadge status="paid" />
-                              ) : (
-                                <StatusBadge status="pending" labelOverride="Not Paid" />
-                              )
-                            ) : (
-                              <StatusBadge status={effectiveStatus(fee)} />
-                            )}
+                            <StatusBadge status={effectiveStatus(fee)} />
 
                             {effectiveStatus(fee) !== "paid" && (
                               <Button
