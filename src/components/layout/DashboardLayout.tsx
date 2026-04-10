@@ -135,6 +135,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const adminNavItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
     { icon: Calendar, label: "Attendance", path: "/admin/attendance" },
+    { icon: FileText, label: "Tests", path: "/admin/tests" },
     { icon: Users, label: "Students", path: "/admin/students" },
     { icon: GraduationCap, label: "Batches", path: "/admin/batches" },
     { icon: Users, label: "Teachers", path: "/admin/teachers" },

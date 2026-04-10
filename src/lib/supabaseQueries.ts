@@ -979,6 +979,32 @@ export const getTestResultsByTest = async (testId: string): Promise<TestResult[]
   return (data as DbTestResult[] | null)?.map(mapTestResult) || [];
 };
 
+export const upsertTestResultsForTest = async (params: {
+  testId: string;
+  entries: Array<{ studentId: string; marksObtained: number; grade?: string | null }>;
+}): Promise<TestResult[]> => {
+  const payload = params.entries.map((e) => ({
+    id: `${params.testId}-${e.studentId}`,
+    institute_id: instituteId(),
+    test_id: params.testId,
+    student_id: e.studentId,
+    marks_obtained: e.marksObtained,
+    grade: e.grade ?? null,
+  }));
+
+  const { data, error } = await supabase
+    .from("test_results")
+    .upsert(payload, { onConflict: "institute_id,test_id,student_id" })
+    .select();
+
+  if (error) {
+    console.error("Error upserting test results:", error);
+    throw error;
+  }
+
+  return (data as DbTestResult[] | null)?.map(mapTestResult) || [];
+};
+
 export const addTestResult = async (result: Omit<TestResult, 'id'>): Promise<TestResult | null> => {
   const payload = {
     id: `${result.testId}-${result.studentId}`,

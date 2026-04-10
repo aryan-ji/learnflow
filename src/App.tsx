@@ -19,6 +19,7 @@ import AdminBatches from "./pages/admin/AdminBatches";
 import AdminTeachers from "./pages/admin/AdminTeachers";
 import AdminFees from "./pages/admin/AdminFees";
 import AdminAttendance from "./pages/admin/AdminAttendance";
+import AdminTests from "./pages/admin/AdminTests";
 
 // Teacher Pages
 import TeacherDashboard from "./pages/teacher/TeacherDashboard";
@@ -100,6 +101,7 @@ const AppRoutes = () => {
       <Route path="/admin/teachers" element={<ProtectedRoute allowedRoles={['admin']}><AdminTeachers /></ProtectedRoute>} />
       <Route path="/admin/fees" element={<ProtectedRoute allowedRoles={['admin']}><AdminFees /></ProtectedRoute>} />
       <Route path="/admin/attendance" element={<ProtectedRoute allowedRoles={['admin']}><AdminAttendance /></ProtectedRoute>} />
+      <Route path="/admin/tests" element={<ProtectedRoute allowedRoles={['admin']}><AdminTests /></ProtectedRoute>} />
 
       {/* Teacher Routes */}
       <Route path="/teacher" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherDashboard /></ProtectedRoute>} />
