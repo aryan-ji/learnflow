@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import StatusBadge from '@/components/dashboard/StatusBadge';
 import { Button } from '@/components/ui/button';
@@ -39,9 +40,20 @@ const AdminStudents = () => {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const [students, setStudents] = useState<Student[]>([]);
-  const [batches, setBatches] = useState<Batch[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data: students = [], isLoading: isStudentsLoading } = useQuery({
+    queryKey: ["students"],
+    queryFn: getStudents,
+  });
+
+  const { data: batches = [], isLoading: isBatchesLoading } = useQuery({
+    queryKey: ["batches"],
+    queryFn: getBatches,
+  });
+
+  const [isMutating, setIsMutating] = useState(false);
+  const loading = isStudentsLoading || isBatchesLoading || isMutating;
 
   const selectedStudent = selectedStudentId ? students.find((s) => s.id === selectedStudentId) ?? null : null;
   const batchNameById = (id: string) => batches.find((b) => b.id === id)?.name ?? id;
@@ -78,23 +90,6 @@ const AdminStudents = () => {
     const matchesBatch = !batchFilterId || student.batchId === batchFilterId;
     return matchesQuery && matchesBatch;
   });
-
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const [s, b] = await Promise.all([getStudents(), getBatches()]);
-        setStudents(s);
-        setBatches(b);
-      } catch (err) {
-        console.error('Error loading students/batches', err);
-        toast({ title: 'Error', description: 'Failed to load data' });
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [toast]);
 
   const handleAddStudent = () => {
     setIsAddStudentDialogOpen(true);
@@ -147,7 +142,7 @@ const AdminStudents = () => {
       return;
     }
 
-    setLoading(true);
+    setIsMutating(true);
     try {
       const parentName = formFatherName.trim() || formMotherName.trim() || `Parent of ${formName.trim()}`;
       const parentEmailForAccount = resolveParentEmail(formParentEmail);
@@ -197,7 +192,7 @@ const AdminStudents = () => {
         return;
       }
 
-      setStudents((prev) => [created, ...prev]);
+      queryClient.invalidateQueries({ queryKey: ["students"] });
       setIsAddStudentDialogOpen(false);
       resetForm();
       toast({
@@ -212,7 +207,7 @@ const AdminStudents = () => {
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setIsMutating(false);
     }
   };
 
@@ -249,7 +244,7 @@ const AdminStudents = () => {
       return;
     }
 
-    setLoading(true);
+    setIsMutating(true);
     try {
       const parentName = editFatherName.trim() || editMotherName.trim() || `Parent of ${editName.trim()}`;
       let parentId = s.parentId;
@@ -300,22 +295,22 @@ const AdminStudents = () => {
         return;
       }
 
-      setStudents((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+      queryClient.invalidateQueries({ queryKey: ["students"] });
       setIsEditStudentDialogOpen(false);
       toast({ title: "Updated", description: "Student updated successfully." });
     } catch (err) {
       console.error("Failed to update student:", err);
       toast({ title: "Error", description: "Failed to update student.", variant: "destructive" });
     } finally {
-      setLoading(false);
+      setIsMutating(false);
     }
   };
 
   const handleDeleteStudent = async (studentId: string) => {
-    setLoading(true);
+    setIsMutating(true);
     try {
       await deleteStudent(studentId);
-      setStudents((prev) => prev.filter((s) => s.id !== studentId));
+      queryClient.invalidateQueries({ queryKey: ["students"] });
       toast({
         title: "Deleted",
         description: "Student deleted successfully.",
@@ -328,7 +323,7 @@ const AdminStudents = () => {
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setIsMutating(false);
     }
   };
 

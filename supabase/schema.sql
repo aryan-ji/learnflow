@@ -171,7 +171,10 @@ create table if not exists public.test_results (
   test_id text not null references public.tests(id) on update cascade on delete cascade,
   student_id text not null references public.students(id) on update cascade on delete cascade,
   marks_obtained integer not null check (marks_obtained >= 0),
+  rank integer,
   grade text,
+  improvement_area text,
+  remark text,
   created_at timestamptz not null default now()
 );
 
@@ -179,6 +182,8 @@ create unique index if not exists test_results_unique_idx
   on public.test_results(institute_id, test_id, student_id);
 create index if not exists test_results_institute_id_idx on public.test_results(institute_id);
 create index if not exists test_results_student_id_idx on public.test_results(student_id);
+create index if not exists test_results_test_rank_idx
+  on public.test_results(institute_id, test_id, rank);
 
 -- FEES
 create table if not exists public.fees (

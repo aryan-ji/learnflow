@@ -70,7 +70,10 @@ type DbTestResult = {
   test_id: string;
   student_id: string;
   marks_obtained: number;
+  rank?: number | null;
   grade?: string | null;
+  improvement_area?: string | null;
+  remark?: string | null;
 };
 
 type DbFee = {
@@ -155,7 +158,10 @@ const mapTestResult = (row: DbTestResult): TestResult => ({
   testId: row.test_id,
   studentId: row.student_id,
   marksObtained: row.marks_obtained,
+  rank: row.rank ?? undefined,
   grade: row.grade ?? undefined,
+  improvementArea: row.improvement_area ?? undefined,
+  remark: row.remark ?? undefined,
 });
 
 const mapFee = (row: DbFee): Fee => ({
@@ -981,7 +987,13 @@ export const getTestResultsByTest = async (testId: string): Promise<TestResult[]
 
 export const upsertTestResultsForTest = async (params: {
   testId: string;
-  entries: Array<{ studentId: string; marksObtained: number; grade?: string | null }>;
+  entries: Array<{
+    studentId: string;
+    marksObtained: number;
+    grade?: string | null;
+    improvementArea?: string | null;
+    remark?: string | null;
+  }>;
 }): Promise<TestResult[]> => {
   const payload = params.entries.map((e) => ({
     id: `${params.testId}-${e.studentId}`,
@@ -990,6 +1002,8 @@ export const upsertTestResultsForTest = async (params: {
     student_id: e.studentId,
     marks_obtained: e.marksObtained,
     grade: e.grade ?? null,
+    improvement_area: e.improvementArea ?? null,
+    remark: e.remark ?? null,
   }));
 
   const { data, error } = await supabase

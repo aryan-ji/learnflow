@@ -23,7 +23,11 @@ type AuthContextType = {
   isAuthenticated: boolean;
   isAuthLoading: boolean;
   loginWithPassword: (email: string, password: string) => Promise<{ ok: boolean; message?: string }>;
-  sendPasswordResetEmail: (email: string) => Promise<{ ok: boolean; message?: string }>;
+  changePasswordWithExisting: (
+    email: string,
+    oldPassword: string,
+    newPassword: string,
+  ) => Promise<{ ok: boolean; message?: string }>;
   logout: () => Promise<void>;
 };
 
@@ -150,16 +154,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return { ok: true };
   };
 
-  const sendPasswordResetEmail = async (email: string) => {
+  const changePasswordWithExisting = async (email: string, oldPassword: string, newPassword: string) => {
     const cleanEmail = email.trim();
-    if (!cleanEmail) return { ok: false, message: "Email is required." };
-
-    const redirectTo = `${window.location.origin}/reset-password`;
-    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, { redirectTo });
-    if (error) {
-      console.error("Failed to send password reset email:", error);
-      return { ok: false, message: error.message };
+    if (!cleanEmail || !oldPassword || !newPassword) {
+      return { ok: false, message: "Email, current password, and new password are required." };
     }
+
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password: oldPassword,
+    });
+    if (signInError) {
+      console.error("Failed to verify current password:", signInError);
+      return { ok: false, message: "Invalid current password." };
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+    if (updateError) {
+      console.error("Failed to update password:", updateError);
+      return { ok: false, message: updateError.message };
+    }
+
     return { ok: true };
   };
 
@@ -177,7 +192,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       isAuthenticated: Boolean(user),
       isAuthLoading,
       loginWithPassword,
-      sendPasswordResetEmail,
+      changePasswordWithExisting,
       logout,
     }),
     [user, instituteId, isAuthLoading],

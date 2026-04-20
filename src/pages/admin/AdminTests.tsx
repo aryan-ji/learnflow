@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import StatusBadge from "@/components/dashboard/StatusBadge";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -27,7 +28,7 @@ import {
   upsertTestResultsForTest,
 } from "@/lib/supabaseQueries";
 import type { Batch, Student, Test, TestResult } from "@/types";
-import { Award, Calendar, Check, Edit, Eye, FileText, MoreVertical, Plus, Users, X } from "lucide-react";
+import { Award, Calendar, Check, ChevronDown, Edit, Eye, FileText, MoreVertical, Plus, Users, X } from "lucide-react";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -69,7 +70,9 @@ const AdminTests = () => {
   const [formTotalMarks, setFormTotalMarks] = useState("100");
 
   // Marks entry per studentId
-  const [marksData, setMarksData] = useState<Record<string, { marks: string; grade: string }>>({});
+  const [marksData, setMarksData] = useState<
+    Record<string, { marks: string; grade: string; improvementArea: string; remark: string }>
+  >({});
 
   useEffect(() => {
     const load = async () => {
@@ -179,13 +182,15 @@ const AdminTests = () => {
     const batchStudents = students.filter((s) => s.batchId === test.batchId);
     const existing = (resultsByTestId.get(testId) ?? []).slice();
 
-    const initial: Record<string, { marks: string; grade: string }> = {};
+    const initial: Record<string, { marks: string; grade: string; improvementArea: string; remark: string }> = {};
     for (const student of batchStudents) {
       const hit = existing.find((r) => r.studentId === student.id) ?? null;
       const marks = hit ? String(hit.marksObtained) : "";
       initial[student.id] = {
         marks,
         grade: marks ? calculateGrade(Number(marks), test.totalMarks) : "",
+        improvementArea: hit?.improvementArea ?? "",
+        remark: hit?.remark ?? "",
       };
     }
     setMarksData(initial);
@@ -210,7 +215,8 @@ const AdminTests = () => {
 
     const entries = batchStudents
       .map((s) => {
-        const raw = (marksData[s.id]?.marks ?? "").trim();
+        const row = marksData[s.id];
+        const raw = (row?.marks ?? "").trim();
         if (!raw) return null;
         const marks = Number(raw);
         if (!Number.isFinite(marks)) return null;
@@ -218,9 +224,17 @@ const AdminTests = () => {
           studentId: s.id,
           marksObtained: marks,
           grade: calculateGrade(marks, selectedTest.totalMarks),
+          improvementArea: (row?.improvementArea ?? "").trim() || null,
+          remark: (row?.remark ?? "").trim() || null,
         };
       })
-      .filter(Boolean) as Array<{ studentId: string; marksObtained: number; grade?: string | null }>;
+      .filter(Boolean) as Array<{
+        studentId: string;
+        marksObtained: number;
+        grade?: string | null;
+        improvementArea?: string | null;
+        remark?: string | null;
+      }>;
 
     if (entries.length === 0) {
       toast({
@@ -364,50 +378,54 @@ const AdminTests = () => {
 
         {/* CREATE TEST DIALOG */}
         <Dialog open={isCreateTestDialogOpen} onOpenChange={setIsCreateTestDialogOpen}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Create Test</DialogTitle>
-              <DialogDescription>Create a new assessment for a batch.</DialogDescription>
-            </DialogHeader>
+          <DialogContent className="p-0 sm:max-w-lg">
+            <div className="flex max-h-[85vh] flex-col">
+              <DialogHeader className="px-6 pt-6 pb-3">
+                <DialogTitle>Create Test</DialogTitle>
+                <DialogDescription>Create a new assessment for a batch.</DialogDescription>
+              </DialogHeader>
 
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Test Name</Label>
-                <Input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Unit Test 1" />
-              </div>
+              <div className="flex-1 overflow-y-auto px-6 pb-4">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Test Name</Label>
+                    <Input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Unit Test 1" />
+                  </div>
 
-              <div className="space-y-2">
-                <Label>Batch</Label>
-                <select
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  value={formBatchId}
-                  onChange={(e) => setFormBatchId(e.target.value)}
-                >
-                  {batches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <div className="space-y-2">
+                    <Label>Batch</Label>
+                    <select
+                      className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      value={formBatchId}
+                      onChange={(e) => setFormBatchId(e.target.value)}
+                    >
+                      {batches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Subject</Label>
-                  <Input value={formSubject} onChange={(e) => setFormSubject(e.target.value)} placeholder="Physics" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Subject</Label>
+                      <Input value={formSubject} onChange={(e) => setFormSubject(e.target.value)} placeholder="Physics" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Total Marks</Label>
+                      <Input value={formTotalMarks} onChange={(e) => setFormTotalMarks(e.target.value)} placeholder="100" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Date</Label>
+                    <Input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Total Marks</Label>
-                  <Input value={formTotalMarks} onChange={(e) => setFormTotalMarks(e.target.value)} placeholder="100" />
-                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label>Date</Label>
-                <Input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="px-6 py-4 border-t bg-background flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setIsCreateTestDialogOpen(false)}>
                   Cancel
                 </Button>
@@ -421,98 +439,167 @@ const AdminTests = () => {
 
         {/* VIEW RESULTS DIALOG */}
         <Dialog open={isViewResultsDialogOpen} onOpenChange={setIsViewResultsDialogOpen}>
-          <DialogContent className="sm:max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Results</DialogTitle>
-              <DialogDescription>
-                {selectedTest ? `${selectedTest.name} • ${selectedBatch?.name ?? selectedTest.batchId}` : "View results"}
-              </DialogDescription>
-            </DialogHeader>
+          <DialogContent className="p-0 sm:max-w-2xl">
+            <div className="flex max-h-[85vh] flex-col">
+              <DialogHeader className="px-6 pt-6 pb-3">
+                <DialogTitle>Results</DialogTitle>
+                <DialogDescription>
+                  {selectedTest ? `${selectedTest.name} • ${selectedBatch?.name ?? selectedTest.batchId}` : "View results"}
+                </DialogDescription>
+              </DialogHeader>
 
-            {!selectedTest ? (
-              <div className="text-sm text-muted-foreground">No test selected.</div>
-            ) : (
-              <div className="space-y-3">
-                {(resultsByTestId.get(selectedTest.id) ?? [])
-                  .slice()
-                  .sort((a, b) => b.marksObtained - a.marksObtained)
-                  .map((r) => {
-                    const s = studentsById.get(r.studentId);
-                    return (
-                      <div key={`${r.testId}:${r.studentId}`} className="flex items-center justify-between rounded-xl border p-4">
-                        <div className="min-w-0">
-                          <div className="font-medium truncate">{s?.name ?? r.studentId}</div>
-                          <div className="text-xs text-muted-foreground truncate">{s?.email ?? ""}</div>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <div className="text-right">
-                            <div className="font-semibold">
-                              {r.marksObtained}/{selectedTest.totalMarks}
+              <div className="flex-1 overflow-y-auto px-6 pb-6">
+                {!selectedTest ? (
+                  <div className="text-sm text-muted-foreground">No test selected.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {(resultsByTestId.get(selectedTest.id) ?? [])
+                      .slice()
+                      .sort((a, b) => b.marksObtained - a.marksObtained)
+                      .map((r) => {
+                        const s = studentsById.get(r.studentId);
+                        return (
+                          <div
+                            key={`${r.testId}:${r.studentId}`}
+                            className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl border p-4"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-medium truncate">{s?.name ?? r.studentId}</div>
+                              <div className="text-xs text-muted-foreground truncate">{s?.email ?? ""}</div>
                             </div>
-                            <div className="text-xs text-muted-foreground">{r.grade ?? ""}</div>
+                            <div className="flex items-center justify-between sm:justify-end gap-4">
+                              <div className="text-right">
+                                <div className="font-semibold">
+                                  {r.marksObtained}/{selectedTest.totalMarks}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  Rank: {r.rank ?? "-"} • {r.grade ?? ""}
+                                </div>
+                              </div>
+                              <StatusBadge status="paid" labelOverride="Recorded" />
+                            </div>
                           </div>
-                          <StatusBadge status="paid" labelOverride="Recorded" />
-                        </div>
-                      </div>
-                    );
-                  })}
-                {(resultsByTestId.get(selectedTest.id) ?? []).length === 0 && (
-                  <div className="text-sm text-muted-foreground">No results yet.</div>
+                        );
+                      })}
+                    {(resultsByTestId.get(selectedTest.id) ?? []).length === 0 && (
+                      <div className="text-sm text-muted-foreground">No results yet.</div>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
+            </div>
           </DialogContent>
         </Dialog>
 
         {/* ENTER MARKS DIALOG */}
         <Dialog open={isEnterMarksDialogOpen} onOpenChange={setIsEnterMarksDialogOpen}>
-          <DialogContent className="sm:max-w-3xl">
-            <DialogHeader>
-              <DialogTitle>Enter Marks</DialogTitle>
-              <DialogDescription>{selectedTest ? `${selectedTest.name} • ${selectedBatch?.name ?? selectedTest.batchId}` : ""}</DialogDescription>
-            </DialogHeader>
+          <DialogContent className="p-0 sm:max-w-3xl">
+            <div className="flex max-h-[85vh] flex-col">
+              <DialogHeader className="px-6 pt-6 pb-3">
+                <DialogTitle>Enter Marks</DialogTitle>
+                <DialogDescription>{selectedTest ? `${selectedTest.name} • ${selectedBatch?.name ?? selectedTest.batchId}` : ""}</DialogDescription>
+              </DialogHeader>
 
-            {!selectedTest ? (
-              <div className="text-sm text-muted-foreground">No test selected.</div>
-            ) : (
-              <div className="space-y-3">
-                {students
-                  .filter((s) => s.batchId === selectedTest.batchId)
-                  .slice()
-                  .sort((a, b) => (a.rollNumber ?? 9999) - (b.rollNumber ?? 9999) || a.name.localeCompare(b.name))
-                  .map((s) => {
-                    const val = marksData[s.id]?.marks ?? "";
-                    const grade = marksData[s.id]?.grade ?? "";
-                    const num = val.trim() ? Number(val) : null;
-                    const ok = num !== null && Number.isFinite(num) && num >= 0 && num <= selectedTest.totalMarks;
-                    return (
-                      <div key={s.id} className="flex items-center justify-between rounded-xl border p-4">
-                        <div className="min-w-0">
-                          <div className="font-medium truncate">
-                            {s.name} <span className="text-xs text-muted-foreground">• Roll {s.rollNumber ?? "-"}</span>
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate">{s.email}</div>
-                        </div>
+              <div className="flex-1 overflow-y-auto px-6 pb-4">
+                {!selectedTest ? (
+                  <div className="text-sm text-muted-foreground">No test selected.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {students
+                      .filter((s) => s.batchId === selectedTest.batchId)
+                      .slice()
+                      .sort((a, b) => (a.rollNumber ?? 9999) - (b.rollNumber ?? 9999) || a.name.localeCompare(b.name))
+                      .map((s) => {
+                        const val = marksData[s.id]?.marks ?? "";
+                        const grade = marksData[s.id]?.grade ?? "";
+                        const improvementArea = marksData[s.id]?.improvementArea ?? "";
+                        const remark = marksData[s.id]?.remark ?? "";
+                        const num = val.trim() ? Number(val) : null;
+                        const ok = num !== null && Number.isFinite(num) && num >= 0 && num <= selectedTest.totalMarks;
+                        return (
+                          <div
+                            key={s.id}
+                            className="rounded-xl border bg-background/40 p-4"
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">
+                                  {s.name} <span className="text-xs text-muted-foreground">• Roll {s.rollNumber ?? "-"}</span>
+                                </div>
+                                <div className="text-xs text-muted-foreground truncate">{s.email}</div>
+                              </div>
 
-                        <div className="flex items-center gap-3">
-                          <div className="w-32">
-                            <Input
-                              value={val}
-                              onChange={(e) => handleMarksChange(s.id, e.target.value)}
-                              placeholder="Marks"
-                              inputMode="numeric"
-                            />
-                          </div>
-                          <div className="w-14 text-center text-sm font-semibold">{grade}</div>
-                          <div className="w-6 flex items-center justify-center">
-                            {val.trim() ? ok ? <Check className="h-4 w-4 text-green-600" /> : <X className="h-4 w-4 text-red-600" /> : null}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                              <div className="flex items-center justify-between sm:justify-end gap-3">
+                                <div className="w-full sm:w-32">
+                                  <Input
+                                    value={val}
+                                    onChange={(e) => handleMarksChange(s.id, e.target.value)}
+                                    placeholder="Marks"
+                                    inputMode="numeric"
+                                    className="h-10"
+                                  />
+                                </div>
+                                <div className="w-12 sm:w-14 text-center text-sm font-semibold">{grade}</div>
+                                <div className="w-6 flex items-center justify-center">
+                                  {val.trim() ? ok ? <Check className="h-4 w-4 text-green-600" /> : <X className="h-4 w-4 text-red-600" /> : null}
+                                </div>
+                              </div>
+                            </div>
 
-                <div className="flex justify-end gap-2 pt-2">
+                            <details className="group mt-3 rounded-xl border bg-muted/30 px-3 py-2">
+                              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 select-none">
+                                <span className="text-xs font-semibold text-muted-foreground">Feedback (optional)</span>
+                                <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                              </summary>
+
+                              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Improvement area</Label>
+                                  <Textarea
+                                    value={improvementArea}
+                                    onChange={(e) =>
+                                      setMarksData((prev) => {
+                                        const current =
+                                          prev[s.id] ?? { marks: "", grade: "", improvementArea: "", remark: "" };
+                                        return {
+                                          ...prev,
+                                          [s.id]: { ...current, improvementArea: e.target.value },
+                                        };
+                                      })
+                                    }
+                                    placeholder="e.g. Improve speed, focus on weak chapters"
+                                    className="min-h-[84px] resize-none bg-background"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Remark</Label>
+                                  <Textarea
+                                    value={remark}
+                                    onChange={(e) =>
+                                      setMarksData((prev) => {
+                                        const current =
+                                          prev[s.id] ?? { marks: "", grade: "", improvementArea: "", remark: "" };
+                                        return {
+                                          ...prev,
+                                          [s.id]: { ...current, remark: e.target.value },
+                                        };
+                                      })
+                                    }
+                                    placeholder="e.g. Good improvement from last test"
+                                    className="min-h-[84px] resize-none bg-background"
+                                  />
+                                </div>
+                              </div>
+                            </details>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+
+              {selectedTest && (
+                <div className="px-6 py-4 border-t bg-background flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setIsEnterMarksDialogOpen(false)}>
                     Cancel
                   </Button>
@@ -520,8 +607,8 @@ const AdminTests = () => {
                     Save Marks
                   </Button>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </DialogContent>
         </Dialog>
       </div>
@@ -530,4 +617,3 @@ const AdminTests = () => {
 };
 
 export default AdminTests;
-

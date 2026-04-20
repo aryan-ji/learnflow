@@ -14,8 +14,10 @@ const LOGO_FALLBACK_SRC = "/learnflow-mark.png";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [isChangePasswordMode, setIsChangePasswordMode] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { loginWithPassword, sendPasswordResetEmail } = useAuth();
+  const { loginWithPassword, changePasswordWithExisting } = useAuth();
   const navigate = useNavigate();
 
   const demoAccounts = [
@@ -39,15 +41,21 @@ export default function Login() {
     }
   };
 
-  const handleForgotPassword = async () => {
-    setIsLoading(true);
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword.trim()) {
+      toast.error("New password is required.");
+      return;
+    }
+
     try {
-      const res = await sendPasswordResetEmail(email);
+      setIsLoading(true);
+      const res = await changePasswordWithExisting(email, password, newPassword);
       if (!res.ok) {
-        toast.error(res.message ?? "Could not send password reset email.");
+        toast.error(res.message ?? "Could not change password.");
         return;
       }
-      toast.success("Password reset email sent. Check your inbox.");
+      toast.success("Password changed successfully.");
     } finally {
       setIsLoading(false);
     }
@@ -88,12 +96,16 @@ export default function Login() {
               </div>
             </div>
 
-            <h1 className="text-3xl font-semibold tracking-tight">Welcome back</h1>
+            <h1 className="text-3xl font-semibold tracking-tight">
+              {isChangePasswordMode ? "Change password" : "Welcome back"}
+            </h1>
             <p className="mt-2 text-sm text-slate-600">
-              Sign in with the email and password shared by your institute admin.
+              {isChangePasswordMode
+                ? "Enter your current password and a new password."
+                : "Sign in with the email and password shared by your institute admin."}
             </p>
 
-            <form onSubmit={handleLogin} className="mt-8 space-y-5">
+            <form onSubmit={isChangePasswordMode ? handleChangePassword : handleLogin} className="mt-8 space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-sm font-semibold text-slate-800">
                   Email
@@ -114,14 +126,14 @@ export default function Login() {
 
               <div className="space-y-2">
                 <Label htmlFor="password" className="text-sm font-semibold text-slate-800">
-                  Password
+                  {isChangePasswordMode ? "Current password" : "Password"}
                 </Label>
                 <div className="relative">
                   <KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                   <Input
                     id="password"
                     type="password"
-                    placeholder="Enter your password"
+                    placeholder={isChangePasswordMode ? "Enter current password" : "Enter your password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="h-12 rounded-xl border-slate-200 bg-white pl-10 focus-visible:ring-2 focus-visible:ring-[#2563EB]"
@@ -130,23 +142,46 @@ export default function Login() {
                 </div>
               </div>
 
+              {isChangePasswordMode && (
+                <div className="space-y-2">
+                  <Label htmlFor="newPassword" className="text-sm font-semibold text-slate-800">
+                    New password
+                  </Label>
+                  <div className="relative">
+                    <KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                    <Input
+                      id="newPassword"
+                      type="password"
+                      placeholder="Enter new password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="h-12 rounded-xl border-slate-200 bg-white pl-10 focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                      required
+                    />
+                  </div>
+                </div>
+              )}
+
               <Button
                 type="submit"
                 size="lg"
                 disabled={isLoading}
                 className="h-12 w-full rounded-xl bg-[#2563EB] text-white hover:bg-[#2563EB]/90"
               >
-                {isLoading ? "Signing in..." : "Sign In"}
+                {isLoading ? "Please wait..." : isChangePasswordMode ? "Change Password" : "Sign In"}
               </Button>
 
               <Button
                 type="button"
                 variant="ghost"
-                disabled={isLoading || !email.trim()}
-                onClick={handleForgotPassword}
+                disabled={isLoading}
+                onClick={() => {
+                  setIsChangePasswordMode((v) => !v);
+                  setNewPassword("");
+                }}
                 className="w-full text-slate-600 hover:text-slate-900"
               >
-                Forgot password? Get reset email
+                {isChangePasswordMode ? "Back to sign in" : "Change password"}
               </Button>
             </form>
 
@@ -197,7 +232,7 @@ export default function Login() {
               <div className="mt-6 grid gap-3 text-sm text-slate-700">
                 {[
                   "Sign in securely with email and password.",
-                  "Forgot password sends a reset email to your inbox.",
+                  "Change password using current password.",
                   "Parents see only their own child's data (RLS).",
                 ].map((x) => (
                   <div key={x} className="flex items-start gap-2">
@@ -210,7 +245,7 @@ export default function Login() {
               <div className="mt-8 rounded-xl border border-slate-200 bg-[#F9FAFB] p-4">
                 <div className="text-sm font-semibold text-slate-900">Tip</div>
                 <div className="mt-1 text-sm text-slate-600">
-                  If you don't know your password, ask your admin or use the reset email option.
+                  If you don't know your password, ask your admin.
                 </div>
               </div>
             </div>

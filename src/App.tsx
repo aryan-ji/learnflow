@@ -9,7 +9,6 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 // Pages
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
-import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
 // Admin Pages
@@ -92,7 +91,6 @@ const AppRoutes = () => {
       {/* Public Routes */}
       <Route path="/" element={isAuthenticated ? <Navigate to={`/${user?.role}`} replace /> : <Landing />} />
       <Route path="/login" element={isAuthenticated ? <Navigate to={`/${user?.role}`} replace /> : <Login />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Admin Routes */}
       <Route path="/admin" element={<ProtectedRoute allowedRoles={['admin']}><AdminDashboard /></ProtectedRoute>} />

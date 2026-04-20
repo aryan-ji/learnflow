@@ -66,7 +66,10 @@ export interface TestResult {
   testId: string;
   studentId: string;
   marksObtained: number;
+  rank?: number;
   grade?: string;
+  improvementArea?: string;
+  remark?: string;
 }
 
 export interface Fee {
