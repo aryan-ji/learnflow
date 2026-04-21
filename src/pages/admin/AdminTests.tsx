@@ -60,7 +60,9 @@ const AdminTests = () => {
   const [isCreateTestDialogOpen, setIsCreateTestDialogOpen] = useState(false);
   const [isViewResultsDialogOpen, setIsViewResultsDialogOpen] = useState(false);
   const [isEnterMarksDialogOpen, setIsEnterMarksDialogOpen] = useState(false);
+  const [isStudentHistoryDialogOpen, setIsStudentHistoryDialogOpen] = useState(false);
   const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
+  const [selectedStudentIdForHistory, setSelectedStudentIdForHistory] = useState<string | null>(null);
 
   // Create form
   const [formName, setFormName] = useState("");
@@ -117,8 +119,32 @@ const AdminTests = () => {
     return map;
   }, [testResults]);
 
+  const resultByTestAndStudent = useMemo(() => {
+    const map = new Map<string, TestResult>();
+    for (const r of testResults) map.set(`${r.testId}:${r.studentId}`, r);
+    return map;
+  }, [testResults]);
+
   const selectedTest = selectedTestId ? tests.find((t) => t.id === selectedTestId) ?? null : null;
   const selectedBatch = selectedTest ? batchesById.get(selectedTest.batchId) ?? null : null;
+
+  const studentHistoryRows = useMemo(() => {
+    if (!selectedStudentIdForHistory) return [];
+    const student = studentsById.get(selectedStudentIdForHistory);
+    if (!student) return [];
+
+    const relatedTests = tests
+      .filter((t) => t.batchId === student.batchId)
+      .slice()
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || a.name.localeCompare(b.name));
+
+    return relatedTests.map((t) => {
+      const r = resultByTestAndStudent.get(`${t.id}:${student.id}`) ?? null;
+      return { test: t, result: r };
+    });
+  }, [resultByTestAndStudent, selectedStudentIdForHistory, studentsById, tests]);
+
+  const selectedHistoryStudent = selectedStudentIdForHistory ? studentsById.get(selectedStudentIdForHistory) ?? null : null;
 
   const handleCreateTest = () => setIsCreateTestDialogOpen(true);
 
@@ -195,6 +221,11 @@ const AdminTests = () => {
     }
     setMarksData(initial);
     setIsEnterMarksDialogOpen(true);
+  };
+
+  const openStudentHistory = (studentId: string) => {
+    setSelectedStudentIdForHistory(studentId);
+    setIsStudentHistoryDialogOpen(true);
   };
 
   const handleMarksChange = (studentId: string, value: string) => {
@@ -527,10 +558,23 @@ const AdminTests = () => {
                                   {s.name} <span className="text-xs text-muted-foreground">• Roll {s.rollNumber ?? "-"}</span>
                                 </div>
                                 <div className="text-xs text-muted-foreground truncate">{s.email}</div>
+                                <div className="mt-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-xs"
+                                    onClick={() => openStudentHistory(s.id)}
+                                  >
+                                    <FileText className="h-3.5 w-3.5 mr-1.5" />
+                                    All tests
+                                  </Button>
+                                </div>
                               </div>
 
-                              <div className="flex items-center justify-between sm:justify-end gap-3">
-                                <div className="w-full sm:w-32">
+                              <div className="grid grid-cols-12 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-3 sm:min-w-[240px]">
+                                <div className="col-span-12 sm:w-32">
+                                  <div className="text-[11px] font-medium text-muted-foreground sm:hidden mb-1">Marks</div>
                                   <Input
                                     value={val}
                                     onChange={(e) => handleMarksChange(s.id, e.target.value)}
@@ -539,9 +583,19 @@ const AdminTests = () => {
                                     className="h-10"
                                   />
                                 </div>
-                                <div className="w-12 sm:w-14 text-center text-sm font-semibold">{grade}</div>
-                                <div className="w-6 flex items-center justify-center">
-                                  {val.trim() ? ok ? <Check className="h-4 w-4 text-green-600" /> : <X className="h-4 w-4 text-red-600" /> : null}
+
+                                <div className="col-span-6 sm:w-16">
+                                  <div className="text-[11px] font-medium text-muted-foreground sm:hidden mb-1">Grade</div>
+                                  <div className="h-10 rounded-md border bg-muted/30 flex items-center justify-center text-sm font-semibold">
+                                    {grade || "-"}
+                                  </div>
+                                </div>
+
+                                <div className="col-span-6 sm:w-12">
+                                  <div className="text-[11px] font-medium text-muted-foreground sm:hidden mb-1">Status</div>
+                                  <div className="h-10 rounded-md border bg-muted/30 flex items-center justify-center">
+                                    {val.trim() ? ok ? <Check className="h-4 w-4 text-green-600" /> : <X className="h-4 w-4 text-red-600" /> : <span className="text-xs text-muted-foreground">—</span>}
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -608,6 +662,80 @@ const AdminTests = () => {
                   </Button>
                 </div>
               )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* STUDENT HISTORY DIALOG */}
+        <Dialog
+          open={isStudentHistoryDialogOpen}
+          onOpenChange={(open) => {
+            setIsStudentHistoryDialogOpen(open);
+            if (!open) setSelectedStudentIdForHistory(null);
+          }}
+        >
+          <DialogContent className="p-0 sm:max-w-2xl">
+            <div className="flex max-h-[85vh] flex-col">
+              <DialogHeader className="px-6 pt-6 pb-3">
+                <DialogTitle>All Test Marks</DialogTitle>
+                <DialogDescription>
+                  {selectedHistoryStudent
+                    ? `${selectedHistoryStudent.name} • Roll ${selectedHistoryStudent.rollNumber ?? "-"}`
+                    : "Student test history"}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="flex-1 overflow-y-auto px-6 pb-6">
+                {!selectedHistoryStudent ? (
+                  <div className="text-sm text-muted-foreground">No student selected.</div>
+                ) : studentHistoryRows.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No tests found for this student.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {studentHistoryRows.map(({ test, result }) => (
+                      <div key={test.id} className="rounded-xl border p-4">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="font-medium truncate">{test.name}</div>
+                            <div className="text-xs text-muted-foreground truncate">
+                              {test.subject} • {String(test.date)}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between sm:justify-end gap-4">
+                            <div className="text-right">
+                              <div className="font-semibold">
+                                {result ? `${result.marksObtained}/${test.totalMarks}` : `—/${test.totalMarks}`}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                Rank: {result?.rank ?? "-"} • {result?.grade ?? ""}
+                              </div>
+                            </div>
+                            <StatusBadge status={result ? "paid" : "pending"} labelOverride={result ? "Recorded" : "Not recorded"} />
+                          </div>
+                        </div>
+
+                        {(result?.improvementArea || result?.remark) && (
+                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                            {result?.improvementArea && (
+                              <div className="rounded-lg border bg-muted/20 p-3">
+                                <div className="text-xs font-semibold text-muted-foreground">Improvement area</div>
+                                <div className="mt-1 text-sm whitespace-pre-wrap">{result.improvementArea}</div>
+                              </div>
+                            )}
+                            {result?.remark && (
+                              <div className="rounded-lg border bg-muted/20 p-3">
+                                <div className="text-xs font-semibold text-muted-foreground">Remark</div>
+                                <div className="mt-1 text-sm whitespace-pre-wrap">{result.remark}</div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </DialogContent>
         </Dialog>
