@@ -109,7 +109,7 @@ const AdminAttendance = () => {
         return;
       }
       const rows = await getStudentsByBatch(selectedBatch);
-      setStudents(rows.map((s) => ({ id: s.id, name: s.name, email: s.email })));
+      setStudents(rows.map((s) => ({ id: s.id, name: s.name, email: s.email, status: s.status })));
     };
     loadStudents();
   }, [selectedBatch]);
@@ -433,7 +433,9 @@ const AdminAttendance = () => {
         </div>
 
         <div className="divide-y">
-          {students.map((student) => {
+          {students
+            .filter((s) => (s as any).status === "active" || attendance[s.id])
+            .map((student) => {
             const status = attendance[student.id];
             const feeStatus = feeStatusByStudentId[student.id] ?? "not_paid";
             const pct = attendancePctByStudentId[student.id] ?? null;

@@ -160,14 +160,6 @@ const AdminFees = () => {
     return next;
   }, [batchFilterId, fees, studentIdFilter, students]);
 
-  const visibleStudents = useMemo(() => {
-    let next = students;
-    if (studentIdFilter) next = next.filter((s) => s.id === studentIdFilter);
-    if (batchFilterId) next = next.filter((s) => s.batchId === batchFilterId);
-    next = next.filter((s) => isStudentEligibleForMonth(s, monthFilter));
-    return [...next].sort((a, b) => a.name.localeCompare(b.name));
-  }, [batchFilterId, monthFilter, studentIdFilter, students]);
-
   const feeByStudentId = useMemo(() => {
     const map = new Map<string, Fee>();
     fees.forEach((f) => {
@@ -175,6 +167,14 @@ const AdminFees = () => {
     });
     return map;
   }, [fees, monthFilter]);
+
+  const visibleStudents = useMemo(() => {
+    let next = students;
+    if (studentIdFilter) next = next.filter((s) => s.id === studentIdFilter);
+    if (batchFilterId) next = next.filter((s) => s.batchId === batchFilterId);
+    next = next.filter((s) => (s.status === "active" || feeByStudentId.has(s.id)) && isStudentEligibleForMonth(s, monthFilter));
+    return [...next].sort((a, b) => a.name.localeCompare(b.name));
+  }, [batchFilterId, monthFilter, studentIdFilter, students, feeByStudentId]);
 
   const studentRows = useMemo(() => {
     return visibleStudents.map((s) => {

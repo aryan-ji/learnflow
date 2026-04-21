@@ -12,7 +12,7 @@ export interface Student {
   id: string;
   rollNumber?: number;
   name: string;
-  email: string;
+  email?: string;
   phone: string;
   batchId: string;
   parentId: string;

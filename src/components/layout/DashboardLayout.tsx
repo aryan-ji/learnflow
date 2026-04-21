@@ -260,7 +260,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         </div>
       </div>
 
-      <nav className="mt-4 space-y-1 flex-1 overflow-y-auto">
+      <nav className="mt-4 space-y-1 flex-1 overflow-y-auto pb-10">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;
 
@@ -398,7 +398,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
           </div>
         </header>
 
-        <main className="p-4 sm:p-6 bg-white">{children}</main>
+        <main className="p-4 sm:p-6 pb-20 sm:pb-32 bg-white">{children}</main>
       </div>
     </div>
   );

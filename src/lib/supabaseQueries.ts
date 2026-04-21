@@ -16,7 +16,7 @@ type DbStudent = {
   id: string;
   roll_number?: number | null;
   name: string;
-  email: string;
+  email?: string | null;
   phone: string;
   mother_name?: string | null;
   father_name?: string | null;
@@ -104,7 +104,7 @@ const mapStudent = (row: DbStudent): Student => ({
   id: row.id,
   rollNumber: row.roll_number ?? undefined,
   name: row.name,
-  email: row.email,
+  email: row.email ?? undefined,
   phone: row.phone,
   batchId: row.batch_id,
   parentId: row.parent_id,
@@ -438,12 +438,18 @@ export const createStudent = async (student: Student): Promise<Student | null> =
   const basePayload: any = {
     institute_id: instituteId(),
     name: student.name,
-    email: student.email,
+    email: student.email || "",
     phone: student.phone,
     batch_id: student.batchId,
     parent_id: student.parentId,
     enrollment_date: student.enrollmentDate,
     status: student.status,
+    mother_name: student.motherName || null,
+    father_name: student.fatherName || null,
+    parent_phone: student.parentPhone || null,
+    parent_email: student.parentEmail || null,
+    address: student.address || null,
+    school: student.school || null,
   };
 
   // If DB has defaults for ID (recommended), omit ID and let Postgres assign.
@@ -543,12 +549,18 @@ export const updateStudent = async (params: {
 
   const basePayload: any = {
     name: params.name,
-    email: cleanEmail || fallbackEmail,
+    email: cleanEmail || "",
     phone: cleanPhone,
     batch_id: params.batchId,
     parent_id: params.parentId,
     enrollment_date: params.enrollmentDate,
     status: params.status,
+    mother_name: params.motherName || null,
+    father_name: params.fatherName || null,
+    parent_phone: params.parentPhone || null,
+    parent_email: params.parentEmail || null,
+    address: params.address || null,
+    school: params.school || null,
   };
 
   // Optional columns (kept conditional so older DB schemas won't 400 on unknown columns)

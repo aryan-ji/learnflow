@@ -441,7 +441,9 @@ const TeacherAttendance = () => {
           </div>
 
           <div className="divide-y">
-            {students.map((student) => {
+            {students
+              .filter((s) => s.status === "active" || attendance[s.id])
+              .map((student) => {
               const status = attendance[student.id];
               const feeStatus = feeStatusByStudentId[student.id] ?? "not_paid";
               const pct = attendancePctByStudentId[student.id] ?? null;

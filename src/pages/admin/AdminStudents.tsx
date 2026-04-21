@@ -24,6 +24,8 @@ import {
   getBatches,
   getOrCreateParentUserByEmail,
   getOrCreateUnassignedParentUser,
+  getStudentById,
+  getUserById,
   getStudents,
   updateStudent,
 } from "@/lib/supabaseQueries";
@@ -38,6 +40,8 @@ const AdminStudents = () => {
   const [isViewStudentDialogOpen, setIsViewStudentDialogOpen] = useState(false);
   const [isEditStudentDialogOpen, setIsEditStudentDialogOpen] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
+  const [viewingParent, setViewingParent] = useState<User | null>(null);
   const { toast } = useToast();
 
   const queryClient = useQueryClient();
@@ -86,7 +90,7 @@ const AdminStudents = () => {
   const filteredStudents = students.filter((student) => {
     const matchesQuery =
       student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      student.email.toLowerCase().includes(searchQuery.toLowerCase());
+      (student.email ?? "").toLowerCase().includes(searchQuery.toLowerCase());
     const matchesBatch = !batchFilterId || student.batchId === batchFilterId;
     return matchesQuery && matchesBatch;
   });
@@ -168,7 +172,7 @@ const AdminStudents = () => {
       const newStudent: Student = {
         id: "",
         name: formName.trim(),
-        email: formEmail.trim() || `student-${Date.now()}@student.local`,
+        email: formEmail.trim() || undefined,
         phone: formPhone.trim() || "",
         motherName: formMotherName.trim() || undefined,
         fatherName: formFatherName.trim() || undefined,
@@ -230,9 +234,30 @@ const AdminStudents = () => {
     setIsEditStudentDialogOpen(true);
   };
 
-  const handleViewStudent = (studentId: string) => {
+  const handleViewStudent = async (studentId: string) => {
     setSelectedStudentId(studentId);
+    setViewingStudent(null);
+    setViewingParent(null);
     setIsViewStudentDialogOpen(true);
+    setIsMutating(true);
+    try {
+      const fresh = await getStudentById(studentId);
+      if (fresh) {
+        setViewingStudent(fresh);
+        if (fresh.parentId) {
+          const p = await getUserById(fresh.parentId);
+          setViewingParent(p);
+        }
+      } else {
+        const local = students.find(s => s.id === studentId) || null;
+        setViewingStudent(local);
+      }
+    } catch (err) {
+      console.error("Failed to fetch fresh student/parent data:", err);
+      setViewingStudent(students.find(s => s.id === studentId) || null);
+    } finally {
+      setIsMutating(false);
+    }
   };
 
   const handleSaveEditStudent = async () => {
@@ -301,6 +326,34 @@ const AdminStudents = () => {
     } catch (err) {
       console.error("Failed to update student:", err);
       toast({ title: "Error", description: "Failed to update student.", variant: "destructive" });
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const toggleStudentStatus = async (student: Student) => {
+    setIsMutating(true);
+    const newStatus = student.status === "active" ? "inactive" : "active";
+    try {
+      const updated = await updateStudent({
+        ...student,
+        status: newStatus,
+        parentId: student.parentId, // Ensure required fields are passed
+      });
+      if (updated) {
+        queryClient.invalidateQueries({ queryKey: ["students"] });
+        toast({
+          title: newStatus === "active" ? "Reactivated" : "Deactivated",
+          description: `${student.name} is now ${newStatus}.`,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to toggle student status:", err);
+      toast({
+        title: "Error",
+        description: "Failed to update student status.",
+        variant: "destructive",
+      });
     } finally {
       setIsMutating(false);
     }
@@ -484,6 +537,19 @@ const AdminStudents = () => {
                               <Edit className="h-4 w-4 mr-2" />
                               Edit
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => toggleStudentStatus(student)}>
+                              {student.status === "active" ? (
+                                <>
+                                  <div className="h-4 w-4 mr-2 rounded-full border-2 border-red-500" />
+                                  Deactivate
+                                </>
+                              ) : (
+                                <>
+                                  <div className="h-4 w-4 mr-2 rounded-full border-2 border-green-500" />
+                                  Reactivate
+                                </>
+                              )}
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => handleDeleteStudent(student.id)} className="text-red-600">
                               <Trash2 className="h-4 w-4 mr-2" />
@@ -505,8 +571,8 @@ const AdminStudents = () => {
 
       {/* ADD STUDENT DIALOG */}
       <Dialog open={isAddStudentDialogOpen} onOpenChange={setIsAddStudentDialogOpen}>
-        <DialogContent className="p-0 sm:max-w-lg">
-          <div className="flex max-h-[85vh] flex-col">
+        <DialogContent className="p-0 max-w-2xl w-[95vw] max-h-[90vh] flex flex-col">
+          <div className="flex flex-col h-full overflow-hidden">
             <DialogHeader className="px-6 pt-6 pb-3">
               <DialogTitle>Add New Student</DialogTitle>
               <DialogDescription>Fill in the student details below</DialogDescription>
@@ -665,87 +731,131 @@ const AdminStudents = () => {
             </DialogHeader>
 
             <div className="flex-1 overflow-y-auto px-6 pb-4">
-              {!selectedStudent ? (
+              {!viewingStudent && isMutating ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                </div>
+              ) : !viewingStudent ? (
                 <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-                  Student not found.
+                  Student not found or failed to load.
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {/* Basic Info Group */}
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="text-xs font-semibold text-slate-500">Name</div>
-                      <div className="mt-1 text-sm font-semibold text-slate-900">{selectedStudent.name}</div>
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Student Name</div>
+                      <div className="mt-1 text-sm font-bold text-slate-900">{viewingStudent.name}</div>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="text-xs font-semibold text-slate-500">Batch</div>
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Roll Number</div>
+                      <div className="mt-1 text-sm font-bold text-primary">
+                        {viewingStudent.rollNumber ?? "Not assigned"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Batch</div>
                       <div className="mt-1 text-sm font-semibold text-slate-900">
-                        {batchNameById(selectedStudent.batchId)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="text-xs font-semibold text-slate-500">Email</div>
-                      <div className="mt-1 text-sm text-slate-900 break-all">{selectedStudent.email || "-"}</div>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="text-xs font-semibold text-slate-500">Phone</div>
-                      <div className="mt-1 text-sm text-slate-900">{selectedStudent.phone || "-"}</div>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="text-xs font-semibold text-slate-500">Enrollment Date</div>
-                      <div className="mt-1 text-sm text-slate-900">
-                        {selectedStudent.enrollmentDate
-                          ? new Date(selectedStudent.enrollmentDate).toLocaleDateString("en-IN", {
-                              day: "numeric",
-                              month: "short",
-                              year: "numeric",
-                            })
-                          : "-"}
+                        {batchNameById(viewingStudent.batchId)}
                       </div>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="text-xs font-semibold text-slate-500">Status</div>
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</div>
                       <div className="mt-2">
-                        <StatusBadge status={selectedStudent.status} />
+                        <StatusBadge status={viewingStudent.status} />
                       </div>
                     </div>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="text-xs font-semibold text-slate-500">Father Name</div>
-                      <div className="mt-1 text-sm text-slate-900">{selectedStudent.fatherName || "-"}</div>
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Personal Email</div>
+                      <div className="mt-1 text-sm text-slate-900 break-all">{viewingStudent.email || "-"}</div>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="text-xs font-semibold text-slate-500">Mother Name</div>
-                      <div className="mt-1 text-sm text-slate-900">{selectedStudent.motherName || "-"}</div>
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Personal Phone</div>
+                      <div className="mt-1 text-sm text-slate-900">{viewingStudent.phone || "-"}</div>
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="text-xs font-semibold text-slate-500">Parent Email</div>
-                      <div className="mt-1 text-sm text-slate-900 break-all">{selectedStudent.parentEmail || "-"}</div>
+                  {/* Parents/Family Section */}
+                  <div className="pt-2 border-t border-slate-100 mt-2">
+                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-4">Family & Parent Details</h4>
+                    
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Father Name</div>
+                        <div className="mt-1 text-sm font-bold text-slate-900">{viewingStudent.fatherName || "-"}</div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Mother Name</div>
+                        <div className="mt-1 text-sm font-bold text-slate-900">{viewingStudent.motherName || "-"}</div>
+                      </div>
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="text-xs font-semibold text-slate-500">Parent Mobile</div>
-                      <div className="mt-1 text-sm text-slate-900">{selectedStudent.parentPhone || "-"}</div>
+
+                    <div className="grid gap-3 sm:grid-cols-2 mt-3">
+                      <div className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Reference Parent Email</div>
+                        <div className="mt-1 text-sm text-slate-900 break-all">{viewingStudent.parentEmail || "-"}</div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Reference Parent Mobile</div>
+                        <div className="mt-1 text-sm text-slate-900">{viewingStudent.parentPhone || "-"}</div>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <div className="text-xs font-semibold text-slate-500">Address</div>
-                    <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{selectedStudent.address || "-"}</div>
+                  {/* Linked Account Section */}
+                  <div className="pt-2 border-t border-slate-100 mt-2">
+                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary mb-4 underline decoration-primary/20 underline-offset-4">Linked User Account (for Login)</h4>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+                        <div className="text-xs font-semibold text-blue-600 uppercase tracking-wider">Account Holder Name</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{viewingParent?.name || "No Account Linked"}</div>
+                      </div>
+                      <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+                        <div className="text-xs font-semibold text-blue-600 uppercase tracking-wider">Account Login Email</div>
+                        <div className="mt-1 text-sm font-black text-slate-900 break-all">{viewingParent?.email || "-"}</div>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <div className="text-xs font-semibold text-slate-500">School</div>
-                    <div className="mt-1 text-sm text-slate-900">{selectedStudent.school || "-"}</div>
+                  {/* Address/School Section */}
+                  <div className="pt-2 border-t border-slate-100 mt-2">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">School / Institution</div>
+                        <div className="mt-1 text-sm text-slate-900">{viewingStudent.school || "-"}</div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Enrollment Date</div>
+                        <div className="mt-1 text-sm text-slate-900">
+                          {viewingStudent.enrollmentDate
+                            ? new Date(viewingStudent.enrollmentDate).toLocaleDateString("en-IN", {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              })
+                            : "-"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 mt-3">
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Address</div>
+                      <div className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{viewingStudent.address || "-"}</div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 mt-3">
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">School / Institution</div>
+                      <div className="mt-1 text-sm text-slate-900">{viewingStudent.school || "-"}</div>
+                    </div>
+                    
+                    {/* Extra spacer for better scrolling */}
+                    <div className="h-12" />
                   </div>
                 </div>
               )}
@@ -759,11 +869,11 @@ const AdminStudents = () => {
               >
                 Close
               </Button>
-              {selectedStudent ? (
+              {viewingStudent ? (
                 <Button
                   onClick={() => {
                     setIsViewStudentDialogOpen(false);
-                    handleEditStudent(selectedStudent.id);
+                    handleEditStudent(viewingStudent.id);
                   }}
                   className="w-full sm:w-auto rounded-xl bg-[#2563EB] text-white hover:bg-[#2563EB]/90"
                 >
@@ -782,8 +892,8 @@ const AdminStudents = () => {
           setIsEditStudentDialogOpen(open);
         }}
       >
-        <DialogContent className="p-0 sm:max-w-lg">
-          <div className="flex max-h-[85vh] flex-col">
+        <DialogContent className="p-0 max-w-2xl w-[95vw] max-h-[90vh] flex flex-col">
+          <div className="flex flex-col h-full overflow-hidden">
             <DialogHeader className="px-6 pt-6 pb-3">
               <DialogTitle>Edit Student</DialogTitle>
               <DialogDescription>Update student information</DialogDescription>

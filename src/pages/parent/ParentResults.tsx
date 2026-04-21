@@ -135,77 +135,91 @@ const ParentResults = () => {
                 {sortedResults.length === 0 ? (
                   <div className="text-sm text-muted-foreground">No results yet.</div>
                 ) : (
-                  <div className="grid md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {sortedResults.map((result) => {
                       const test = testsById[result.testId];
                       const percentage = test?.totalMarks ? Math.round((result.marksObtained / test.totalMarks) * 100) : 0;
-                      const feedback = (result.improvementArea ?? "").trim() || (result.remark ?? "").trim();
+                      const hasFeedback = (result.improvementArea ?? "").trim() || (result.remark ?? "").trim();
 
                       return (
-                        <div key={result.id} className="bg-muted/40 rounded-2xl p-5 hover:bg-muted/60 transition">
-                          <div className="flex items-start justify-between gap-3 mb-4">
-                            <div className="min-w-0">
-                              <h4 className="font-medium truncate">{test?.name ?? result.testId}</h4>
-                              <p className="text-sm text-muted-foreground truncate">{test?.subject ?? ""}</p>
-                            </div>
-
-                            <span
-                              className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${getGradeColor(result.grade || "")}`}
-                            >
-                              <Award className="h-4 w-4 mr-1" />
-                              {result.grade ?? "-"}
-                            </span>
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="flex justify-between text-sm">
-                              <span className="text-muted-foreground">Marks</span>
-                              <span className="font-semibold">
-                                {result.marksObtained} / {test?.totalMarks ?? "-"}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between text-sm">
-                              <span className="text-muted-foreground flex items-center gap-2">
-                                <Trophy className="h-4 w-4" />
-                                Rank
-                              </span>
-                              <span className="font-semibold text-primary">{result.rank ?? "-"}</span>
-                            </div>
-
-                            <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${percentage}%` }} />
-                            </div>
-
-                            <div className="flex justify-between text-sm">
-                              <span className="text-muted-foreground">
-                                {test?.date
-                                  ? new Date(test.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
-                                  : ""}
-                              </span>
-                              <span className="font-semibold text-primary">{percentage}%</span>
-                            </div>
-
-                            {feedback && (
-                              <div className="mt-3 rounded-xl border bg-background p-3">
-                                <div className="flex items-center gap-2 text-sm font-semibold">
-                                  <MessageSquareText className="h-4 w-4 text-primary" />
-                                  Teacher feedback
+                        <div key={result.id} className="relative overflow-hidden bg-card border rounded-2xl p-0 hover:shadow-lg transition-all duration-300 group">
+                          {/* Top accent bar based on grade */}
+                          <div className={`h-1.5 w-full ${percentage >= 80 ? 'bg-green-500' : percentage >= 60 ? 'bg-primary' : 'bg-orange-500'}`} />
+                          
+                          <div className="p-5">
+                            <div className="flex flex-col gap-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <h4 className="font-bold text-slate-900 group-hover:text-primary transition-colors truncate">{test?.name ?? "Special Assessment"}</h4>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground bg-slate-100 px-2 py-0.5 rounded-md">
+                                      {test?.subject ?? "Academic"}
+                                    </span>
+                                    <span className="text-[11px] font-medium text-slate-400">
+                                      {test?.date ? new Date(test.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : ""}
+                                    </span>
+                                  </div>
                                 </div>
-                                {(result.improvementArea ?? "").trim() && (
-                                  <div className="mt-2 text-sm">
-                                    <span className="font-semibold text-muted-foreground">Improvement: </span>
-                                    {result.improvementArea}
-                                  </div>
-                                )}
-                                {(result.remark ?? "").trim() && (
-                                  <div className="mt-1 text-sm">
-                                    <span className="font-semibold text-muted-foreground">Remark: </span>
-                                    {result.remark}
-                                  </div>
-                                )}
+
+                                <div className={`flex flex-col items-center justify-center h-12 w-12 rounded-xl shrink-0 ${getGradeColor(result.grade || "")} font-black text-lg shadow-sm border`}>
+                                  {result.grade ?? "-"}
+                                </div>
                               </div>
-                            )}
+
+                              <div className="grid grid-cols-2 gap-4 py-4 border-y border-slate-50">
+                                <div>
+                                  <div className="text-[10px] font-bold uppercase text-slate-400 mb-1">Score</div>
+                                  <div className="font-black text-slate-900 text-xl">
+                                    {result.marksObtained}<span className="text-sm text-slate-400 font-bold">/{test?.totalMarks ?? "-"}</span>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-[10px] font-bold uppercase text-slate-400 mb-1">Percentage</div>
+                                  <div className="font-black text-primary text-xl">
+                                    {percentage}%
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="space-y-3 pt-2">
+                                <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-tight text-slate-500">
+                                  <span className="flex items-center gap-1.5">
+                                    <Trophy className="h-3.5 w-3.5 text-primary" />
+                                    Class Rank
+                                  </span>
+                                  <span className="text-slate-900 bg-primary/10 px-2.5 py-0.5 rounded-full">Rank #{result.rank ?? "-"}</span>
+                                </div>
+
+                                <div className="relative h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                                  <div 
+                                    className={`absolute left-0 top-0 h-full rounded-full transition-all duration-1000 ease-out shadow-sm ${percentage >= 80 ? 'bg-green-500' : percentage >= 60 ? 'bg-primary' : 'bg-orange-500'}`} 
+                                    style={{ width: `${percentage}%` }} 
+                                  />
+                                </div>
+                              </div>
+
+                              {hasFeedback && (
+                                <div className="mt-2 rounded-xl bg-slate-50/80 p-3.5 border border-slate-100 shadow-sm">
+                                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-primary mb-2">
+                                    <MessageSquareText className="h-3.5 w-3.5" />
+                                    Instructor Comments
+                                  </div>
+                                  <div className="space-y-2">
+                                    {(result.improvementArea ?? "").trim() && (
+                                      <div className="text-xs leading-relaxed text-slate-600">
+                                        <span className="font-bold text-slate-500 uppercase text-[9px] mr-1 underline decoration-primary/30 underline-offset-2">Focus Area:</span>
+                                        {result.improvementArea}
+                                      </div>
+                                    )}
+                                    {(result.remark ?? "").trim() && (
+                                      <div className="text-xs leading-relaxed text-slate-600 italic border-l-2 border-primary/20 pl-3">
+                                        "{result.remark}"
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
