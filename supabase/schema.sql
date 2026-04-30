@@ -50,7 +50,8 @@ create table if not exists public.batches (
   subject text not null,
   teacher_id text not null references public.teachers(id) on update cascade on delete restrict,
   schedule text not null,
-  student_count integer not null default 0 check (student_count >= 0)
+  student_count integer not null default 0 check (student_count >= 0),
+  default_fee_amount integer
 );
 
 create index if not exists batches_institute_id_idx on public.batches(institute_id);

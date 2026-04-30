@@ -27,7 +27,7 @@ import {
   getFees,
   getInstituteSettings,
   getStudents,
-  updateFeeStatus,
+  updateBatchDefaultFeeAmount,
   updateInstituteHideFeeAmounts,
   upsertFees,
 } from "@/lib/supabaseQueries";
@@ -74,8 +74,11 @@ const AdminFees = () => {
   const [addBatchId, setAddBatchId] = useState(""); // student picker filter ("" = all)
   const [addMonth, setAddMonth] = useState(currentMonthKey());
   const [paidDate, setPaidDate] = useState(todayIso());
-  const [batchDefaultFeeByBatchId, setBatchDefaultFeeByBatchId] = useState<Record<string, number>>({});
   const [batchDefaultAmountDraft, setBatchDefaultAmountDraft] = useState<string>("");
+  const [savingBatchDefault, setSavingBatchDefault] = useState(false);
+  const [addAmount, setAddAmount] = useState<string>("");
+  const [addAmountDirty, setAddAmountDirty] = useState(false);
+  const [localBatchDefaultFeeByBatchId, setLocalBatchDefaultFeeByBatchId] = useState<Record<string, number>>({});
   const [studentPickerQuery, setStudentPickerQuery] = useState("");
   const [studentPickerOpen, setStudentPickerOpen] = useState(false);
 
@@ -84,7 +87,7 @@ const AdminFees = () => {
       const raw = localStorage.getItem(DEFAULT_FEE_STORE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Record<string, number>;
-        if (parsed && typeof parsed === "object") setBatchDefaultFeeByBatchId(parsed);
+        if (parsed && typeof parsed === "object") setLocalBatchDefaultFeeByBatchId(parsed);
       }
     } catch (e) {
       console.warn("Failed to read batch default fees from localStorage:", e);
@@ -119,11 +122,11 @@ const AdminFees = () => {
 
   useEffect(() => {
     try {
-      localStorage.setItem(DEFAULT_FEE_STORE_KEY, JSON.stringify(batchDefaultFeeByBatchId));
+      localStorage.setItem(DEFAULT_FEE_STORE_KEY, JSON.stringify(localBatchDefaultFeeByBatchId));
     } catch (e) {
       console.warn("Failed to save batch default fees to localStorage:", e);
     }
-  }, [batchDefaultFeeByBatchId]);
+  }, [localBatchDefaultFeeByBatchId]);
 
   const studentIdFilter = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -143,6 +146,21 @@ const AdminFees = () => {
     batches.forEach((b) => map.set(b.id, b.name));
     return map;
   }, [batches]);
+
+  const dbBatchDefaultFeeByBatchId = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const b of batches) {
+      if (typeof b.defaultFeeAmount === "number" && Number.isFinite(b.defaultFeeAmount) && b.defaultFeeAmount > 0) {
+        map[b.id] = b.defaultFeeAmount;
+      }
+    }
+    return map;
+  }, [batches]);
+
+  const batchDefaultFeeByBatchId = useMemo(() => {
+    // Prefer DB defaults when available; fall back to localStorage for older schemas.
+    return { ...localBatchDefaultFeeByBatchId, ...dbBatchDefaultFeeByBatchId };
+  }, [dbBatchDefaultFeeByBatchId, localBatchDefaultFeeByBatchId]);
 
   useEffect(() => {
     if (!batchFilterId) {
@@ -207,33 +225,22 @@ const AdminFees = () => {
     setIsRemindDialogOpen(true);
   };
 
-  const handleMarkAsPaid = async (feeId: string) => {
-    setLoading(true);
-    try {
-      const updated = await updateFeeStatus(feeId, "paid", todayIso());
-      if (!updated) {
-        toast({
-          title: "Error",
-          description: "Failed to update fee status.",
-          variant: "destructive",
-        });
-        return;
-      }
-      setFees((prev) => prev.map((f) => (f.id === feeId ? updated : f)));
-      toast({
-        title: "Success",
-        description: "Fee marked as paid.",
-      });
-    } catch (error) {
-      console.error("Failed to mark fee as paid:", error);
-      toast({
-        title: "Error",
-        description: "Failed to update fee. Check Supabase permissions.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
+  const openMarkPaidDialog = (params: {
+    studentId: string;
+    batchId: string;
+    month: string;
+    preferredAmount?: number | null;
+  }) => {
+    setAddBatchId(params.batchId);
+    setAddStudentId(params.studentId);
+    const student = studentsById.get(params.studentId);
+    if (student) setStudentPickerQuery(`${student.name} • ${student.email}`);
+    setAddMonth(params.month);
+    setPaidDate(todayIso());
+    setAddAmount(params.preferredAmount !== undefined && params.preferredAmount !== null ? String(params.preferredAmount) : "");
+    setAddAmountDirty(false);
+    setStudentPickerOpen(false);
+    setIsAddDialogOpen(true);
   };
 
   const handleSendReminderEmail = () => {
@@ -261,37 +268,25 @@ const AdminFees = () => {
       return;
     }
 
+    let resolvedAmount = 0;
+    if (!hideFeeAmounts) {
+      const num = Number(addAmount);
+      if (!Number.isFinite(num) || num <= 0) {
+        toast({ title: "Invalid amount", description: "Enter a valid fee amount.", variant: "destructive" });
+        return;
+      }
+      resolvedAmount = num;
+    }
+
     setLoading(true);
     try {
-      if (existing) {
-        const updated = await updateFeeStatus(existing.id, "paid", paidDate || todayIso());
-        if (!updated) {
-          toast({ title: "Error", description: "Failed to mark as paid.", variant: "destructive" });
-          return;
-        }
-        setFees((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
-        toast({ title: "Success", description: "Marked as paid." });
-        setIsAddDialogOpen(false);
-        return;
-      }
-
-      const defaultAmount = batchDefaultFeeByBatchId[targetStudent.batchId];
-      if (!hideFeeAmounts && (defaultAmount === undefined || defaultAmount <= 0)) {
-        toast({
-          title: "Set default fee first",
-          description: "Set a default fee amount for this student's batch (or enable Hide fee amounts).",
-          variant: "destructive",
-        });
-        return;
-      }
-
       const payload: Fee = {
-        id: `fee-${targetStudent.id}-${addMonth}`,
+        id: existing?.id ?? `fee-${targetStudent.id}-${addMonth}`,
         studentId: targetStudent.id,
         month: addMonth,
-        amount: hideFeeAmounts ? 0 : defaultAmount,
+        amount: hideFeeAmounts ? 0 : resolvedAmount,
         status: "paid",
-        dueDate: paidDate || todayIso(),
+        dueDate: existing?.dueDate ?? (paidDate || todayIso()),
         paidDate: paidDate || todayIso(),
       };
 
@@ -301,9 +296,14 @@ const AdminFees = () => {
         return;
       }
 
-      setFees((prev) => [created[0], ...prev]);
+      setFees((prev) => {
+        const next = prev.filter((f) => f.id !== created[0].id);
+        return [created[0], ...next];
+      });
       toast({ title: "Success", description: "Marked as paid." });
       setIsAddDialogOpen(false);
+      setAddAmount("");
+      setAddAmountDirty(false);
     } catch (error) {
       console.error("Failed to mark paid:", error);
       toast({ title: "Error", description: "Failed to mark as paid.", variant: "destructive" });
@@ -333,6 +333,8 @@ const AdminFees = () => {
         setAddBatchId(s.batchId);
         setAddStudentId(s.id);
         setStudentPickerQuery(`${s.name} • ${s.email}`);
+        setAddAmount("");
+        setAddAmountDirty(false);
         setStudentPickerOpen(false);
         return;
       }
@@ -341,6 +343,19 @@ const AdminFees = () => {
     // If the page is filtered by batch, carry that into the dialog's batch filter.
     if (batchFilterId) setAddBatchId(batchFilterId);
   }, [addStudentId, batchFilterId, isAddDialogOpen, studentIdFilter, students]);
+
+  useEffect(() => {
+    if (!isAddDialogOpen) return;
+    if (hideFeeAmounts) return;
+    if (!addStudentId) return;
+    if (addAmountDirty) return;
+
+    const s = students.find((x) => x.id === addStudentId) ?? null;
+    if (!s) return;
+    const existing = fees.find((f) => f.studentId === s.id && f.month === addMonth) || null;
+    const nextAmount = existing?.amount ?? batchDefaultFeeByBatchId[s.batchId] ?? null;
+    setAddAmount(nextAmount !== null ? String(nextAmount) : "");
+  }, [addAmountDirty, addMonth, addStudentId, batchDefaultFeeByBatchId, fees, hideFeeAmounts, isAddDialogOpen, students]);
 
   return (
     <DashboardLayout>
@@ -386,6 +401,12 @@ const AdminFees = () => {
               onClick={() => {
                 setAddMonth(monthFilter);
                 setPaidDate(todayIso());
+                setAddStudentId("");
+                setAddBatchId(batchFilterId || "");
+                setStudentPickerQuery("");
+                setStudentPickerOpen(false);
+                setAddAmount("");
+                setAddAmountDirty(false);
                 setIsAddDialogOpen(true);
               }}
               className="rounded-xl bg-[#2563EB] text-white hover:bg-[#2563EB]/90"
@@ -455,29 +476,80 @@ const AdminFees = () => {
                   value={batchDefaultAmountDraft}
                   onChange={(e) => setBatchDefaultAmountDraft(e.target.value)}
                   className="h-11 rounded-xl pl-8 bg-white"
-                  disabled={!batchFilterId}
+                  disabled={!batchFilterId || savingBatchDefault}
                 />
               </div>
               <Button
                 type="button"
                 variant="outline"
                 className="h-11 rounded-xl"
-                disabled={!batchFilterId}
-                onClick={() => {
-                  const num = Number(batchDefaultAmountDraft);
-                  if (!Number.isFinite(num) || num <= 0) {
-                    toast({ title: "Invalid default", description: "Enter a valid default amount.", variant: "destructive" });
+                disabled={!batchFilterId || savingBatchDefault}
+                onClick={async () => {
+                  if (!batchFilterId) return;
+                  const batch = batches.find((b) => b.id === batchFilterId) ?? null;
+                  if (!batch) {
+                    toast({ title: "Batch missing", description: "Selected batch not found.", variant: "destructive" });
                     return;
                   }
-                  setBatchDefaultFeeByBatchId((prev) => ({ ...prev, [batchFilterId]: num }));
-                  toast({ title: "Saved", description: "Default fee saved for this batch." });
+
+                  const raw = batchDefaultAmountDraft.trim();
+                  let nextDefault: number | null = null;
+                  if (raw) {
+                    const num = Number(raw);
+                    if (!Number.isFinite(num) || num <= 0) {
+                      toast({
+                        title: "Invalid default",
+                        description: "Enter a valid default amount, or clear it to remove.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                    nextDefault = num;
+                  }
+
+                  setSavingBatchDefault(true);
+                  try {
+                    const res = await updateBatchDefaultFeeAmount({ batchId: batch.id, defaultFeeAmount: nextDefault });
+
+                    if (res.ok && res.batch) {
+                      setBatches((prev) => prev.map((b) => (b.id === res.batch!.id ? res.batch! : b)));
+                      setLocalBatchDefaultFeeByBatchId((prev) => {
+                        const next = { ...prev };
+                        delete next[batch.id];
+                        return next;
+                      });
+                      toast({
+                        title: "Saved",
+                        description: nextDefault ? "Default fee saved for this batch." : "Default fee cleared for this batch.",
+                      });
+                      return;
+                    }
+
+                    if (res.missingColumn) {
+                      setLocalBatchDefaultFeeByBatchId((prev) => {
+                        const next = { ...prev };
+                        if (nextDefault === null) delete next[batch.id];
+                        else next[batch.id] = nextDefault;
+                        return next;
+                      });
+                      toast({
+                        title: "Saved (local)",
+                        description: "Apply migration `007_batches_default_fee_amount.sql` and refresh Supabase schema cache to persist defaults.",
+                      });
+                      return;
+                    }
+
+                    toast({ title: "Error", description: "Failed to save default fee for this batch.", variant: "destructive" });
+                  } finally {
+                    setSavingBatchDefault(false);
+                  }
                 }}
               >
                 Save
               </Button>
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              Used when marking students as paid (for creating a paid record if one doesn't exist yet).
+              Prefills the amount when marking a student as paid. You can still change the amount per student.
             </div>
           </div>
           ) : null}
@@ -618,19 +690,14 @@ const AdminFees = () => {
                             {row.status !== "paid" ? (
                               <>
                                 {fee ? (
-                                  <DropdownMenuItem onClick={() => handleMarkAsPaid(fee.id)}>
+                                  <DropdownMenuItem onClick={() => openMarkPaidDialog({ studentId: student.id, batchId: student.batchId, month: monthFilter, preferredAmount: fee.amount })}>
                                   <Check className="h-4 w-4 mr-2" />
                                   Mark as Paid
                                   </DropdownMenuItem>
                                 ) : (
                                   <DropdownMenuItem
                                     onClick={() => {
-                                      setAddBatchId(student.batchId);
-                                      setAddStudentId(student.id);
-                                      setStudentPickerQuery(`${student.name} • ${student.email}`);
-                                      setAddMonth(monthFilter);
-                                      setPaidDate(todayIso());
-                                      setIsAddDialogOpen(true);
+                                      openMarkPaidDialog({ studentId: student.id, batchId: student.batchId, month: monthFilter });
                                     }}
                                   >
                                     <Check className="h-4 w-4 mr-2" />
@@ -701,6 +768,8 @@ const AdminFees = () => {
             setStudentPickerQuery("");
             setAddStudentId("");
             setAddBatchId("");
+            setAddAmount("");
+            setAddAmountDirty(false);
           }
         }}
       >
@@ -722,6 +791,8 @@ const AdminFees = () => {
                   setAddBatchId(e.target.value);
                   setStudentPickerQuery("");
                   setAddStudentId("");
+                  setAddAmount("");
+                  setAddAmountDirty(false);
                   setStudentPickerOpen(false);
                 }}
               >
@@ -748,12 +819,15 @@ const AdminFees = () => {
                     setStudentPickerOpen(true);
                   }}
                   onFocus={() => setStudentPickerOpen(true)}
-                  onBlur={() => setTimeout(() => setStudentPickerOpen(false), 150)}
+                  onBlur={() => setStudentPickerOpen(false)}
                   className="h-11 rounded-xl bg-white"
                 />
 
                 {studentPickerOpen ? (
-                  <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                  <div
+                    className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
                     <div className="max-h-64 overflow-auto p-2">
                       {selectableStudents.length === 0 ? (
                         <div className="px-3 py-2 text-sm text-slate-600">No students found</div>
@@ -762,9 +836,12 @@ const AdminFees = () => {
                           <button
                             key={s.id}
                             type="button"
-                            onClick={() => {
+                            onMouseDown={(e) => {
+                              e.preventDefault();
                               setAddStudentId(s.id);
                               setStudentPickerQuery(`${s.name} • ${s.email}`);
+                              setAddAmount("");
+                              setAddAmountDirty(false);
                               setStudentPickerOpen(false);
                             }}
                             className="w-full rounded-lg px-3 py-2 text-left hover:bg-[#F9FAFB]"
@@ -805,6 +882,26 @@ const AdminFees = () => {
                 <Input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} className="h-11 rounded-xl" />
               </div>
             </div>
+
+            {!hideFeeAmounts ? (
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-800">Amount</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">{"\u20B9"}</span>
+                  <Input
+                    inputMode="numeric"
+                    placeholder="e.g. 1500"
+                    value={addAmount}
+                    onChange={(e) => {
+                      setAddAmount(e.target.value);
+                      setAddAmountDirty(true);
+                    }}
+                    className="h-11 rounded-xl pl-8"
+                  />
+                </div>
+                <div className="text-xs text-slate-500">Prefilled from the batch default (if set), but you can change it per student.</div>
+              </div>
+            ) : null}
 
             {addStudentId ? (
               <div className="rounded-xl border border-slate-200 bg-[#F9FAFB] p-4 text-xs text-slate-600">

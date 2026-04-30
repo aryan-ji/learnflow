@@ -89,4 +89,3 @@ begin
     perform public.recompute_test_ranks(r.institute_id, r.test_id);
   end loop;
 end $$;
-

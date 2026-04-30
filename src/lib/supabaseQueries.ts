@@ -37,6 +37,7 @@ type DbBatch = {
   teacher_id: string;
   schedule: string;
   student_count: number;
+  default_fee_amount?: number | null;
 };
 
 type DbTeacher = {
@@ -74,6 +75,7 @@ type DbTestResult = {
   grade?: string | null;
   improvement_area?: string | null;
   remark?: string | null;
+  created_at?: string | null;
 };
 
 type DbFee = {
@@ -125,6 +127,7 @@ const mapBatch = (row: DbBatch): Batch => ({
   teacherId: row.teacher_id,
   schedule: row.schedule,
   studentCount: row.student_count,
+  defaultFeeAmount: row.default_fee_amount ?? undefined,
 });
 
 const mapTeacher = (row: DbTeacher): Teacher => ({
@@ -162,6 +165,7 @@ const mapTestResult = (row: DbTestResult): TestResult => ({
   grade: row.grade ?? undefined,
   improvementArea: row.improvement_area ?? undefined,
   remark: row.remark ?? undefined,
+  createdAt: row.created_at ?? undefined,
 });
 
 const mapFee = (row: DbFee): Fee => ({
@@ -671,6 +675,7 @@ export const createBatch = async (batch: Batch): Promise<Batch | null> => {
     teacher_id: batch.teacherId,
     schedule: batch.schedule,
     student_count: batch.studentCount,
+    default_fee_amount: batch.defaultFeeAmount ?? null,
   };
 
   // If DB has defaults for ID (recommended), omit ID and let Postgres assign.
@@ -689,27 +694,68 @@ export const updateBatch = async (params: {
   subject: string;
   schedule: string;
   teacherId: string;
+  defaultFeeAmount?: number | null;
 }): Promise<Batch | null> => {
-  const payload = {
+  const payload: any = {
     name: params.name,
     subject: params.subject,
     schedule: params.schedule,
     teacher_id: params.teacherId,
+    ...(params.defaultFeeAmount !== undefined ? { default_fee_amount: params.defaultFeeAmount } : {}),
   };
 
-  const { data, error } = await supabase
-    .from("batches")
-    .update(payload)
-    .eq("institute_id", instituteId())
-    .eq("id", params.id)
-    .select()
-    .single();
+  const runUpdate = async (updatePayload: any) => {
+    return await supabase
+      .from("batches")
+      .update(updatePayload)
+      .eq("institute_id", instituteId())
+      .eq("id", params.id)
+      .select()
+      .single();
+  };
+
+  const { data, error } = await runUpdate(payload);
 
   if (error) {
+    const code = (error as any)?.code;
+    // If the new column isn't migrated yet, PostgREST returns 400 (PGRST204: column not found).
+    if (code === "PGRST204" && payload.default_fee_amount !== undefined) {
+      const retryPayload = { ...payload };
+      delete retryPayload.default_fee_amount;
+      const retry = await runUpdate(retryPayload);
+      if (retry.error) {
+        console.error("Error updating batch:", retry.error);
+        return null;
+      }
+      return retry.data ? mapBatch(retry.data as DbBatch) : null;
+    }
+
     console.error("Error updating batch:", error);
     return null;
   }
   return data ? mapBatch(data as DbBatch) : null;
+};
+
+export const updateBatchDefaultFeeAmount = async (params: {
+  batchId: string;
+  defaultFeeAmount: number | null;
+}): Promise<{ ok: boolean; missingColumn?: boolean; batch?: Batch | null }> => {
+  const { data, error } = await supabase
+    .from("batches")
+    .update({ default_fee_amount: params.defaultFeeAmount } as any)
+    .eq("institute_id", instituteId())
+    .eq("id", params.batchId)
+    .select()
+    .single();
+
+  if (error) {
+    const code = (error as any)?.code;
+    if (code === "PGRST204") return { ok: false, missingColumn: true };
+    console.error("Error updating batch default fee:", error);
+    return { ok: false };
+  }
+
+  return { ok: true, batch: data ? mapBatch(data as DbBatch) : null };
 };
 
 export const deleteBatch = async (batchId: string): Promise<boolean> => {
@@ -971,7 +1017,12 @@ export const createTest = async (test: Test): Promise<Test | null> => {
 
 // Test Results
 export const getTestResults = async (): Promise<TestResult[]> => {
-  const { data, error } = await supabase.from('test_results').select('*').eq("institute_id", instituteId());
+  const { data, error } = await supabase
+    .from("test_results")
+    .select("*")
+    .eq("institute_id", instituteId())
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
   if (error) {
     console.error('Error fetching test results:', error);
     return [];
@@ -980,7 +1031,13 @@ export const getTestResults = async (): Promise<TestResult[]> => {
 };
 
 export const getTestResultsByStudent = async (studentId: string): Promise<TestResult[]> => {
-  const { data, error } = await supabase.from('test_results').select('*').eq("institute_id", instituteId()).eq('student_id', studentId);
+  const { data, error } = await supabase
+    .from("test_results")
+    .select("*")
+    .eq("institute_id", instituteId())
+    .eq("student_id", studentId)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
   if (error) {
     console.error('Error fetching student test results:', error);
     return [];
@@ -989,12 +1046,62 @@ export const getTestResultsByStudent = async (studentId: string): Promise<TestRe
 };
 
 export const getTestResultsByTest = async (testId: string): Promise<TestResult[]> => {
-  const { data, error } = await supabase.from('test_results').select('*').eq("institute_id", instituteId()).eq('test_id', testId);
+  const { data, error } = await supabase
+    .from("test_results")
+    .select("*")
+    .eq("institute_id", instituteId())
+    .eq("test_id", testId)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
   if (error) {
     console.error('Error fetching test results:', error);
     return [];
   }
   return (data as DbTestResult[] | null)?.map(mapTestResult) || [];
+};
+
+export const getTestResultsByTestBatched = async (params: {
+  testId: string;
+  limit?: number;
+  offset?: number;
+  ascending?: boolean;
+}): Promise<TestResult[]> => {
+  const { data, error } = await supabase.rpc("list_test_results_for_test_time_ordered", {
+    p_test_id: params.testId,
+    p_limit: params.limit ?? 50,
+    p_offset: params.offset ?? 0,
+    p_ascending: params.ascending ?? false,
+  });
+
+  if (error) {
+    console.error("Error fetching test results batch:", error);
+    return [];
+  }
+
+  return (data as DbTestResult[] | null)?.map(mapTestResult) || [];
+};
+
+export const batchUpdateTestResultsFeedback = async (updates: Array<{
+  id: string;
+  improvementArea?: string | null;
+  remark?: string | null;
+}>): Promise<number> => {
+  const payload = updates.map((u) => ({
+    id: u.id,
+    improvement_area: u.improvementArea ?? null,
+    remark: u.remark ?? null,
+  }));
+
+  const { data, error } = await supabase.rpc("batch_update_test_results_feedback", {
+    p_updates: payload,
+  });
+
+  if (error) {
+    console.error("Error batch updating feedback:", error);
+    throw error;
+  }
+
+  return Number(data ?? 0);
 };
 
 export const upsertTestResultsForTest = async (params: {

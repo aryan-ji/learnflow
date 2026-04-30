@@ -33,6 +33,7 @@ export interface Batch {
   teacherId: string;
   schedule: string;
   studentCount: number;
+  defaultFeeAmount?: number;
 }
 
 export interface Teacher {
@@ -70,6 +71,7 @@ export interface TestResult {
   grade?: string;
   improvementArea?: string;
   remark?: string;
+  createdAt?: string;
 }
 
 export interface Fee {
